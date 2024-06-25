@@ -7,8 +7,9 @@ from dotenv import load_dotenv
 from cloudflare import Cloudflare
 from cloudflare.types.dns import ARecord, CNAMERecord
 
+log_file = os.path.join(os.path.dirname(__file__), 'py_logs.log')
 logging.basicConfig(
-    filename='py_logs.log',
+    filename=log_file,
     filemode="w",
     encoding='utf-8',
     format='%(asctime)s [%(levelname)s] %(message)s',
