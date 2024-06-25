@@ -1,0 +1,11 @@
+# Environment
+.env
+venv/
+
+# Visual Studio Code
+.vscode
+
+# Python
+__pycache__
+.python-version
+*.log
