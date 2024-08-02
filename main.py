@@ -100,6 +100,8 @@ def update_dns_records(cf: Cloudflare, records: list, zone_id: str, ip: str):
 
 def main():
     external_ip = get_public_ip()
+    if external_ip is None:
+        return
     cf = Cloudflare()
     dns_records = fetch_dns_records(cf, os.getenv('ZONE_ID'), type='A')
     update_dns_records(cf, dns_records, os.getenv('ZONE_ID'), ip=external_ip)
