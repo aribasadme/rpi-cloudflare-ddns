@@ -1,4 +1,4 @@
-# rpi-dynamic-dns
+# rpi-cloudflare-ddns
 
 This Python script is designed to update your DNS records with your current external IP address. It uses the Cloudflare API to fetch and update the DNS records for a specified zone.
 
@@ -23,11 +23,11 @@ This script is currently configured to only update 'A' type DNS records for a si
 
 1. Clone the repository:
 ```sh
-git clone https://github.com/your-username/rpi-dynamic-dns.git
+git clone https://github.com/your-username/rpi-cloudflare-ddns.git
 ```
 2. Change to the project directory:
 ```sh
-cd rpi-dynamic-dns
+cd rpi-cloudflare-ddns
 ```
 3. Create a virtual environment and activate it:
 ```sh

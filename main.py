@@ -92,7 +92,7 @@ def update_dns_records(cf: Cloudflare, records: list, zone_id: str, ip: str):
                 name=record.name,
                 type=record.type,
                 ttl=record.ttl,
-                comment=f"Updated by rpi-dynamic-dns on {datetime.now()}"
+                comment=f"Updated by rpi-cloudflare-ddns on {datetime.now()}"
             )
         except Exception as e:
             logging.error(f"Error: {e.reason.strerror}")
