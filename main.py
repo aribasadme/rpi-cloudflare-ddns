@@ -64,6 +64,7 @@ def fetch_dns_records(cf: Cloudflare, zone_id: str, type: str = 'ALL') -> list:
 
     logging.info(f"Filtering records by type: {type}")
     filtered_records = [record for record in records if filter_func(record)]
+    logging.debug(f"Filtered records: {filtered_records}")
     logging.info(f"DNS records filtered: {len(filtered_records)}")
 
     return filtered_records
