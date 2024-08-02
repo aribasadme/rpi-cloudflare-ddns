@@ -30,11 +30,37 @@ def get_public_ip() -> str:
         url = "https://api.ipify.org"  # IPv4 only
         response = urllib.request.urlopen(url, timeout=5)
         external_ip = response.read().decode('utf-8')
-        logging.info(f"External IP: {external_ip}")
+        logging.info(f"Current IP: {external_ip}")
         return external_ip
     except Exception as e:
         logging.error(f"Error: {e.reason.strerror}")
         return
+
+
+def ip_has_changed() -> tuple[bool, str]:
+    """
+    Checks if the external IP address has changed since the last run and
+    updates it.
+
+    Returns:
+        bool: True and the new IP address if the IP address has changed,
+              False otherwise
+    """
+    try:
+        with open('ip.txt', 'r') as f:
+            old_ip = f.read().strip()
+            logging.info(f"Old IP: {old_ip}")
+        new_ip = get_public_ip()
+        if old_ip == new_ip:
+            logging.info("IP address has not changed")
+            return False, None
+        with open('ip.txt', 'w') as f:
+            f.write(new_ip)
+        logging.info("Saving new IP address to cache")
+        return True, new_ip
+    except Exception as e:
+        logging.error(f"Error: {e.reason.strerror}")
+        return False, None
 
 
 def fetch_dns_records(cf: Cloudflare, zone_id: str, type: str = 'ALL') -> list:
@@ -100,13 +126,12 @@ def update_dns_records(cf: Cloudflare, records: list, zone_id: str, ip: str):
 
 
 def main():
-    external_ip = get_public_ip()
-    if external_ip is None:
-        return
-    cf = Cloudflare()
-    dns_records = fetch_dns_records(cf, os.getenv('ZONE_ID'), type='A')
-    update_dns_records(cf, dns_records, os.getenv('ZONE_ID'), ip=external_ip)
-    logging.info("DNS records updated successfully")
+    has_changed, ip = ip_has_changed()
+    if has_changed:
+        cf = Cloudflare()
+        dns_records = fetch_dns_records(cf, os.getenv('ZONE_ID'), type='A')
+        update_dns_records(cf, dns_records, os.getenv('ZONE_ID'), ip=ip)
+        logging.info("DNS records updated successfully")
 
 
 if __name__ == '__main__':
