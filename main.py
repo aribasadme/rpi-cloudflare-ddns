@@ -18,6 +18,8 @@ logging.basicConfig(
 
 load_dotenv()
 
+ip_file = os.path.join(os.path.dirname(__file__), 'ip.txt')
+
 
 def get_public_ip() -> str:
     """
@@ -47,14 +49,14 @@ def ip_has_changed() -> tuple[bool, str]:
               False otherwise
     """
     try:
-        with open('ip.txt', 'r') as f:
+        with open(ip_file, 'r') as f:
             old_ip = f.read().strip()
             logging.info(f"Old IP: {old_ip}")
         new_ip = get_public_ip()
         if old_ip == new_ip:
             logging.info("IP address has not changed")
             return False, None
-        with open('ip.txt', 'w') as f:
+        with open(ip_file, 'w') as f:
             f.write(new_ip)
         logging.info("Saving new IP address to cache")
         return True, new_ip
