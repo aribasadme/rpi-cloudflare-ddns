@@ -40,7 +40,7 @@ pip install -r requirements.txt
 ```
 5. Set the environment variables for Cloudflare credentials and zone ID:
 ```sh
-export CLOUDFLARE_API_KEY=your_cloudflare_api_key
+export CLOUDFLARE_API_TOKEN=your_cloudflare_api_token
 export ZONE_ID=your_cloudflare_zone_id
 ```
 6. Run the script:
