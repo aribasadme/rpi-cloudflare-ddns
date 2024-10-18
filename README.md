@@ -43,6 +43,8 @@ pip install -r requirements.txt
 export CLOUDFLARE_API_TOKEN=your_cloudflare_api_token
 export ZONE_ID=your_cloudflare_zone_id
 ```
+Note: If you don't have a token yet, follow the guide [Create API token](https://developers.cloudflare.com/fundamentals/api/get-started/create-token/)
+
 6. Run the script:
 ```sh
 python main.py
