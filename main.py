@@ -65,7 +65,7 @@ def ip_has_changed() -> tuple[bool, str]:
         return False, None
 
 
-def fetch_dns_records(cf: Cloudflare, zone_id: str, type: str = 'ALL') -> list:
+def fetch_dns_records(cf: Cloudflare, zone_id: str, type: str = "A") -> list:
     """
     Fetches the DNS records for the specified zone.
 
