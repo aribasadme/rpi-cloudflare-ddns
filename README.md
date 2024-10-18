@@ -15,7 +15,7 @@ This script is currently configured to only update 'A' type DNS records for a si
 
 ## Prerequisites
 
-- Python 3.6 or higher
+- Python 3.7 or higher
 - Cloudflare API credentials (API key and zone ID)
 - Environment variables for Cloudflare credentials and zone ID
 
