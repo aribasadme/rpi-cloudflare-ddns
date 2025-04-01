@@ -1,148 +1,273 @@
-import logging
-import os
-import urllib.request
-import sys
+__version__ = "1.0.0"
 
 from datetime import datetime
+from dataclasses import dataclass
+import logging
+from itertools import groupby
+import json
+from operator import attrgetter
+import os
+import urllib.request
+from string import Template
+import sys
+from typing import Dict, List, Optional
+
 from dotenv import load_dotenv
 from cloudflare import Cloudflare
-from cloudflare.types.dns import ARecord, CNAMERecord
+from cloudflare.types.dns import ARecord, AAAARecord
 
 
-logger = logging.getLogger()
-logger.setLevel(logging.INFO)
-
-log_file = os.path.join(os.path.dirname(__file__), "py_logs.log")
-log_formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
-
-file_handler = logging.FileHandler(log_file, mode="w", encoding="utf-8")
-file_handler.setFormatter(log_formatter)
-
-console_handler = logging.StreamHandler(sys.stdout)
-console_handler.setFormatter(log_formatter)
-
-logger.addHandler(file_handler)
-logger.addHandler(console_handler)
+logger = logging.getLogger("ddns_updater")
 
 load_dotenv()
 
-ip_file = os.path.join(os.path.dirname(__file__), "ip.txt")
+ENV_VARS = {
+    key: value for (key, value) in os.environ.items() if key.startswith("CF_DDNS_")
+}
+
+BASE_PATH = os.getcwd()
 
 
-def get_public_ip() -> str:
+@dataclass
+class DnsUpdateRequest:
+    zone_id: str
+    fqdn: str
+    record_id: str
+    record_type: str
+    proxied: bool
+    current_content: str
+
+
+def setup_logging(log_level=logging.INFO) -> None:
     """
-    Retrieves the external IP address of the machine.
+    Configure logging to stdout/stderr.
+    Should be called at the start of the application.
+    """
+    logging.getLogger().setLevel(logging.WARNING)
+
+    logger.setLevel(log_level)
+
+    logger.handlers.clear()
+
+    log_formatter = logging.Formatter(
+        "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setFormatter(log_formatter)
+
+    logger.addHandler(console_handler)
+
+    logging.getLogger("urllib3").setLevel(logging.WARNING)
+    logging.getLogger("cloudflare").setLevel(logging.WARNING)
+
+    return logger
+
+
+def load_configuration():
+    """
+    Loads configuration with better error handling and validation
+    """
+    try:
+        config_path = os.path.join(BASE_PATH, "config.json")
+        if not os.path.exists(config_path):
+            raise FileNotFoundError(f"Configuration file not found at {config_path}")
+
+        with open(config_path, "r") as config_file:
+            config = json.loads(Template(config_file.read()).safe_substitute(ENV_VARS))
+
+            # Validate required fields
+            required_fields = ["cloudflare"]
+            for field in required_fields:
+                if field not in config:
+                    raise ValueError(f"Missing required field: {field}")
+
+            return config
+    except json.JSONDecodeError as e:
+        logger.error(f"Invalid JSON in config file: {str(e)}")
+        raise
+    except Exception as e:
+        logger.error(f"Error loading configuration: {str(e)}")
+        raise
+
+
+def get_public_ip(timeout: int = 5) -> Optional[str]:
+    """
+    Retrieves the public IP address of the machine.
 
     Returns:
-        str: The external IP address
+        str: The public IP address
+
+    Raises:
+        URLError: If the connection to the IP service fails
+        TimeoutError: If the request times out
+
     """
+    public_ip = None
     try:
         url = "https://api.ipify.org"  # IPv4 only
-        response = urllib.request.urlopen(url, timeout=5)
-        external_ip = response.read().decode("utf-8")
-        logger.info(f"Current IP: {external_ip}")
-        return external_ip
-    except Exception as e:
-        logger.error(f"Error: {e.reason.strerror}")
-        return
+        response = urllib.request.urlopen(url, timeout=timeout)
+        public_ip = response.read().decode("utf-8")
+        logger.info(f"Public IP: {public_ip}")
+    except urllib.error.URLError as e:
+        logger.error(f"Connection error: {e}")
+    except TimeoutError:
+        logger.error(f"Request timed out after {timeout} seconds")
+    finally:
+        return public_ip
 
 
-def ip_has_changed() -> tuple[bool, str]:
+def fetch_records(cf: Cloudflare, zone_id: str) -> list[Dict]:
     """
-    Checks if the external IP address has changed since the last run and
-    updates it.
-
-    Returns:
-        bool: True and the new IP address if the IP address has changed,
-              False otherwise
-    """
-    try:
-        with open(ip_file, "r") as f:
-            old_ip = f.read().strip()
-            logger.info(f"Old IP: {old_ip}")
-        new_ip = get_public_ip()
-        if old_ip == new_ip:
-            logger.info("IP address has not changed")
-            return False, None
-        with open(ip_file, "w") as f:
-            f.write(new_ip)
-        logger.info("Saving new IP address to cache")
-        return True, new_ip
-    except Exception as e:
-        logger.error(f"Error: {e.reason.strerror}")
-        return False, None
-
-
-def fetch_dns_records(cf: Cloudflare, zone_id: str, type: str = "A") -> list:
-    """
-    Fetches the DNS records for the specified zone.
+    Fetches all DNS records for the specified zone.
 
     Args:
         cf (Cloudflare): An instance of the Cloudflare class
         zone_id (str): The ID of the Cloudflare zone
-        record_type (str): The type of DNS records to fetch ('A' or 'CNAME',
-            defaults to 'ALL')
 
     Returns:
-        list: A list of DNS records
+        list: A list of only A or AAAA records
     """
-    record_types = {
-        "ALL": lambda record: True,
-        "A": lambda record: isinstance(record, ARecord),
-        "CNAME": lambda record: isinstance(record, CNAMERecord),
-    }
-    filter_func = record_types.get(type, None)
-    if filter_func is None:
-        raise ValueError(f"Invalid record type: {type}")
-
-    records = cf.dns.records.list(zone_id=zone_id)
-    logger.info(f"DNS records fetched: {len(list(records))}")
-
-    logger.info(f"Filtering records by type: {type}")
-    filtered_records = [record for record in records if filter_func(record)]
-    logging.debug(f"Filtered records: {filtered_records}")
-    logger.info(f"DNS records filtered: {len(filtered_records)}")
-
-    return filtered_records
+    try:
+        records = cf.dns.records.list(zone_id=zone_id)
+        for record in records:
+            logger.debug(f"Record: {record}")
+        return [
+            record for record in records if isinstance(record, (ARecord, AAAARecord))
+        ]
+    except Exception as e:
+        logger.error(f"Error fetching records for zone {zone_id}: {str(e)}")
+        return []
 
 
-def update_dns_records(cf: Cloudflare, records: list, zone_id: str, ip: str):
+def prepare_updates(
+    config: dict, records: List[Dict], ip: str
+) -> List[DnsUpdateRequest]:
+    """
+    Prepares a list of records that need to be updated.
+
+    Args:
+        config (dict):
+        records (List[Dict]): List of records that need to be updated
+        new_ip (str): IP address for all records
+
+    Returns:
+        List[DnsUpdateRequest]:
+    """
+    updates: List[DnsUpdateRequest] = []
+
+    zone_id = config["zone_id"]
+    base_domain = config["zone_name"]
+
+    record_map: Dict[str, Dict] = {}
+    for record in records:
+        record_map[record.name.lower()] = record
+
+    for subdomain in config["subdomains"]:
+        name = subdomain["name"].lower().strip()
+        proxied = subdomain["proxied"]
+
+        fqdn = base_domain
+        if name != "" and name != "@":
+            fqdn = f"{name}.{base_domain}"
+
+        if record := record_map.get(fqdn):
+            if record.content != ip:
+                updates.append(
+                    DnsUpdateRequest(
+                        zone_id=zone_id,
+                        fqdn=fqdn,
+                        record_id=record.id,
+                        record_type=record.type,
+                        proxied=proxied,
+                        current_content=record.content,
+                    )
+                )
+
+    return updates
+
+
+def update_records(cf: Cloudflare, updates: List[DnsUpdateRequest], ip: str, ttl: int):
     """
     Updates the DNS records for the specified domain.
 
     Args:
         cf (Cloudflare): An instance of the Cloudflare class
         records (list): A list of DNS records to update
-        zone_id (str): The ID of the Cloudflare zone
+        cf_config (dict): Options to be updated
         ip (str): The new IP address to set for the DNS records
     """
-    for record in records:
-        logging.debug(f"Updating record: {record}")
-        if record.content == ip:
-            logger.info(f"No changes needed for {record.name}")
-            continue
+    for zone_id, zone_updates in groupby(updates, key=attrgetter("zone_id")):
+        zone_updates = list(zone_updates)
+
         try:
-            cf.dns.records.update(
-                dns_record_id=record.id,
-                zone_id=zone_id,
-                content=ip,
-                name=record.name,
-                type=record.type,
-                ttl=record.ttl,
-                comment=f"Updated by rpi-cloudflare-ddns on {datetime.now()}",
-            )
+            for update in zone_updates:
+                try:
+                    cf.dns.records.update(
+                        dns_record_id=update.record_id,
+                        zone_id=zone_id,
+                        content=ip,
+                        name=update.fqdn,
+                        type=update.record_type,
+                        proxied=update.proxied,
+                        ttl=ttl,
+                        comment=f"Updated by rpi-cloudflare-ddns on {datetime.now()}",
+                    )
+                    logger.info(
+                        f"Updated {update.fqdn} from {update.current_content} to {ip}"
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to update {update.fqdn}: {str(e)}")
+                    continue
+
         except Exception as e:
-            logger.error(f"Error: {e.reason.strerror}")
+            logger.error(f"Error processing zone {zone_id}: {str(e)}")
+            continue
 
 
 def main():
-    has_changed, ip = ip_has_changed()
-    if has_changed:
-        cf = Cloudflare()
-        dns_records = fetch_dns_records(cf, os.getenv("ZONE_ID"), type="A")
-        update_dns_records(cf, dns_records, os.getenv("ZONE_ID"), ip=ip)
-        logger.info("DNS records updated successfully")
+    try:
+        logger = setup_logging()
+
+        config = load_configuration()
+
+        ttl = int(config.get("ttl", 300))
+
+        ip = get_public_ip()
+        if not ip:
+            logger.error("Failed to obtain public IP")
+            return 1
+
+        for cf_config in config["cloudflare"]:
+            try:
+                api_token = cf_config["authentication"]["api_token"]
+                cf = Cloudflare(api_token=api_token)
+
+                zone_id = cf_config["zone_id"]
+
+                zone = cf.zones.get(zone_id=zone_id)
+                if zone is None:
+                    logger.error(f"Zone not found: {zone_id}")
+                    continue
+                cf_config["zone_name"] = zone.name
+
+                records = fetch_records(cf, zone_id)
+                updates = prepare_updates(cf_config, records, ip)
+                if updates:
+                    update_records(cf, updates, ip, ttl)
+                else:
+                    logger.info("No records need updating")
+
+            except Exception as e:
+                logger.error(f"Error processing configuration: {str(e)}")
+                continue
+
+        return 0
+    except Exception as e:
+        logger.error(f"Application error: {str(e)}")
+        return 1
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
