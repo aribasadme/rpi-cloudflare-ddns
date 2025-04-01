@@ -77,10 +77,9 @@ Create a `config.json` file with your Cloudflare configuration:
 services:
   ddns-updater:
     build: .
-    network_mode: "host"
+    volumes:
+      - ./config.json:/app/config.json:ro
     environment:
-      PUID: 1000
-      PGID: 1000
       CF_DDNS_API_TOKEN: ${CF_DDNS_API_TOKEN}
     restart: unless-stopped
 ```
