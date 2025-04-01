@@ -1,21 +1,20 @@
 __version__ = "1.0.0"
 
-from datetime import datetime
-from dataclasses import dataclass
-import logging
-from itertools import groupby
 import json
-from operator import attrgetter
+import logging
 import os
-import urllib.request
-from string import Template
 import sys
+import urllib.request
+from dataclasses import dataclass
+from datetime import datetime
+from itertools import groupby
+from operator import attrgetter
+from string import Template
 from typing import Dict, List, Optional
 
-from dotenv import load_dotenv
 from cloudflare import Cloudflare
-from cloudflare.types.dns import ARecord, AAAARecord
-
+from cloudflare.types.dns import AAAARecord, ARecord
+from dotenv import load_dotenv
 
 logger = logging.getLogger("ddns_updater")
 
