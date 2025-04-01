@@ -1,10 +1,19 @@
-# rpi-cloudflare-ddns
+# Raspberry Pi Cloudflare DDNS Updater
 
-This Python script is designed to update your DNS records with your current external IP address. It uses the Cloudflare API to fetch and update the DNS records for a specified zone.
+A Python-based Dynamic DNS updater for Cloudflare that automatically updates DNS records when your public IP address changes. Designed to be lightweight and containerized.
 
 ## Disclaimer
 
-This script is currently configured to only update 'A' type DNS records for a single Cloudflare zone. The zone ID is hardcoded in an environment variable, as I only have access to one Cloudflare zone at the moment. If you need to update other record types or manage multiple zones, you will need to modify the script accordingly.
+This script is configured to update 'A' DNS records across multiple Cloudflare zones. While the application is designed to handle multiple domains and zones efficiently, please note:
+
+1. The script currently supports only IPv4 (A records) updates
+2. All DNS records must be pre-existing in Cloudflare (the script doesn't create new records)
+3. The script assumes all configured domains are managed under the same Cloudflare account
+4. API rate limits apply based on your Cloudflare plan
+5. While the script is designed to be efficient, large numbers of DNS records may impact performance
+
+If you need to update other record types (like CNAME, MX, etc.) or require additional functionality, you will need to modify the script accordingly.
+
 
 ## Features
 
@@ -16,43 +25,120 @@ This script is currently configured to only update 'A' type DNS records for a si
 ## Prerequisites
 
 - Python 3.7 or higher
-- Cloudflare API credentials (API key and zone ID)
-- Environment variables for Cloudflare credentials and zone ID
+- Docker installed on your system
+- Cloudflare API Token with DNS edit permissions
+- Your domain(s) managed by Cloudflare
 
-## Installation
+## Configuration
 
-1. Clone the repository:
-```sh
-git clone https://github.com/your-username/rpi-cloudflare-ddns.git
-```
-2. Change to the project directory:
-```sh
-cd rpi-cloudflare-ddns
-```
-3. Create a virtual environment and activate it:
-```sh
-python3 -m venv venv
-source venv/bin/activate
-```
-4. Install the required dependencies:
-```sh
-pip install -r requirements.txt
-```
-5. Set the environment variables for Cloudflare credentials and zone ID:
-```sh
-export CLOUDFLARE_API_TOKEN=your_cloudflare_api_token
-export ZONE_ID=your_cloudflare_zone_id
-```
-Note: If you don't have a token yet, follow the guide [Create API token](https://developers.cloudflare.com/fundamentals/api/get-started/create-token/)
+Create a `config.json` file with your Cloudflare configuration:
 
-6. Run the script:
-```sh
-python main.py
+```json
+{
+    "ttl": 300,
+    "cloudflare": [
+        {
+            "authentication": {
+                "api_token": "your-cloudflare-api-token"
+            },
+            "zone_id": "your-zone-id",
+            "subdomains": [
+                {
+                    "name": "@",
+                    "proxied": true
+                },
+                {
+                    "name": "www",
+                    "proxied": true
+                }
+            ]
+        }
+    ]
+}
 ```
 
-## Usage
+### Configuration Parameters
 
-The script will automatically update the DNS records with the current external IP address. You can set up a cron job or a systemd service to run the script periodically to keep the DNS records up-to-date.
+- `ttl`: Time-to-live for DNS records in seconds (defailts to 300)
+- `cloudflare`: Array of zone configurations
+    - `authentication.api_token`: Your Cloudflare API token
+    - `zone_id`: Your Cloudflare zone ID
+    - `subdomains`: Array of subdomain configurations
+        `name`: Subdomain name (use "@" or empty "" for root domain)
+        `proxied`: Whether to proxy through Cloudflare (true/false). Note: if `true`, sets TTL to Auto (300)
+
+## Docker Deployment
+
+### Using Docker Compose (Recommended)
+
+1. Create a `docker-compose.yml` file:
+
+```yml
+services:
+  ddns-updater:
+    build: .
+    network_mode: "host"
+    environment:
+      PUID: 1000
+      PGID: 1000
+      CF_DDNS_API_TOKEN: ${CF_DDNS_API_TOKEN}
+    restart: unless-stopped
+```
+
+2. Run the container:
+
+```sh
+docker-compose up -d
+```
+
+### Using Docker CLI
+
+1. Build the image:
+
+```sh
+docker build -t rpi-cloudflare-ddns .
+```
+
+2. Run the container:
+
+```sh
+docker run -d \
+  --name rpi-cloudflare-ddns \
+  --restart unless-stopped \
+  rpi-cloudflare-ddns
+```
+
+## Environment Variables
+- Define environmental variables starts with `CF_DDNS_` and use it in config.json (Example: `CF_DDNS_API_TOKEN`)
+
+## Monitoring
+
+### Logs
+
+View container logs:
+
+```sh
+docker logs rpi-cloudflare-ddns
+# or follow the logs
+docker logs -f rpi-cloudflare-ddns
+```
+
+## Troubleshooting
+
+Common issues and solutions:
+
+1. **DNS records not updating**
+    - Verify your API token has the correct permissions
+    - Check the container logs for error messages
+    - Verify your zone ID is correct
+2. **Container stops unexpectedly**
+    - Check container logs for error messages
+    - Verify your configuration file is valid JSON
+    - Ensure the container has internet access
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## License
 
