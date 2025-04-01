@@ -1,0 +1,17 @@
+{
+  "cloudflare": [
+    {
+      "authentication": {
+        "api_token": "$CF_API_TOKEN"
+      },
+      "zone_id": "$CF_ZONE_ID",
+      "subdomains": [
+        {
+          "name": "",
+          "proxied": false
+        }
+      ]
+    }
+  ],
+  "ttl": 300
+}
