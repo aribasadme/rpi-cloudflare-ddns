@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import sys
+import time
 import urllib.request
 from dataclasses import dataclass
 from datetime import datetime
@@ -85,9 +86,6 @@ def load_configuration():
             return config
     except json.JSONDecodeError as e:
         logger.error(f"Invalid JSON in config file: {str(e)}")
-        raise
-    except Exception as e:
-        logger.error(f"Error loading configuration: {str(e)}")
         raise
 
 
@@ -226,43 +224,74 @@ def update_records(cf: Cloudflare, updates: List[DnsUpdateRequest], ip: str, ttl
             continue
 
 
+def run() -> None:
+    """
+    Runs the DNS update check periodically
+    """
+    try:
+        config = load_configuration()
+        ttl = int(config.get("ttl", 300))
+        check_interval = os.environ.get("CHECK_INTERVAL", 900)
+        logger.info(f"Starting periodic checks every {check_interval} seconds")
+
+        last_known_ip: Optional[str] = None
+
+        while True:
+            try:
+                ip = get_public_ip()
+                if not ip:
+                    logger.error("Failed to obtain public IP")
+                    time.sleep(check_interval)
+                    continue
+
+                if ip != last_known_ip:
+                    logger.info(f"Public IP changed from {last_known_ip} to {ip}")
+                    for cf_config in config["cloudflare"]:
+                        try:
+                            api_token = cf_config["authentication"]["api_token"]
+                            cf = Cloudflare(api_token=api_token)
+
+                            zone_id = cf_config["zone_id"]
+
+                            zone = cf.zones.get(zone_id=zone_id)
+                            if zone is None:
+                                logger.error(f"Zone not found: {zone_id}")
+                                continue
+                            cf_config["zone_name"] = zone.name
+
+                            records = fetch_records(cf, zone_id)
+                            updates = prepare_updates(cf_config, records, ip)
+                            if updates:
+                                update_records(cf, updates, ip, ttl)
+                            else:
+                                logger.info("No records need updating")
+
+                        except Exception as e:
+                            logger.error(f"Error processing configuration: {str(e)}")
+                            continue
+
+                    last_known_ip = ip
+                else:
+                    logger.info(f"No IP change detected. Current IP: {ip}")
+
+                time.sleep(check_interval)
+
+            except Exception as e:
+                logger.error(f"Error in check cycle: {str(e)}")
+                time.sleep(check_interval)
+
+    except Exception as e:
+        logger.error(f"Application error: {str(e)}")
+        return 1
+
+
 def main():
     try:
         logger = setup_logging()
-
-        config = load_configuration()
-
-        ttl = int(config.get("ttl", 300))
-
-        ip = get_public_ip()
-        if not ip:
-            logger.error("Failed to obtain public IP")
-            return 1
-
-        for cf_config in config["cloudflare"]:
-            try:
-                api_token = cf_config["authentication"]["api_token"]
-                cf = Cloudflare(api_token=api_token)
-
-                zone_id = cf_config["zone_id"]
-
-                zone = cf.zones.get(zone_id=zone_id)
-                if zone is None:
-                    logger.error(f"Zone not found: {zone_id}")
-                    continue
-                cf_config["zone_name"] = zone.name
-
-                records = fetch_records(cf, zone_id)
-                updates = prepare_updates(cf_config, records, ip)
-                if updates:
-                    update_records(cf, updates, ip, ttl)
-                else:
-                    logger.info("No records need updating")
-
-            except Exception as e:
-                logger.error(f"Error processing configuration: {str(e)}")
-                continue
-
+        run()
+        return 0
+    except KeyboardInterrupt:
+        logger.info("Application stopped by user")
         return 0
     except Exception as e:
         logger.error(f"Application error: {str(e)}")

@@ -18,9 +18,8 @@ If you need to update other record types (like CNAME, MX, etc.) or require addit
 ## Features
 
 - Retrieves the external IP address of the machine using the `ipify.org` API.
-- Fetches the existing DNS records for the specified Cloudflare zone.
-- Updates the DNS records with the new external IP address.
-- Logs all actions to a log file (`py_logs.log`) for debugging purposes.
+- Automatic IP address monitoring and DNS record updates
+- Support for multiple Cloudflare zones and domains
 
 ## Prerequisites
 
@@ -69,6 +68,28 @@ Create a `config.json` file with your Cloudflare configuration:
 
 ## Docker Deployment
 
+### Environment Variables
+- You can define environmental variables that starts with `CF_DDNS_` and use it in config.json (Example: `CF_DDNS_API_TOKEN`).
+```bash
+export CF_DDNS_API_TOKEN=your_cloudflare_api_token
+```
+
+- You can also use a `.env` file to manage them:
+```text
+CF_DDNS_API_TOKEN=your_cloudflare_api_token
+CF_DDNS_ZONE_ID=your_cloudflare_zone_id
+CHECK_INTERVAL=900
+```
+
+- Then edit you `config.json` accordingly:
+```json
+{
+  "cloudflare": [
+    {
+      "authentication": {
+        "api_token": "${CF_DDNS_API_TOKEN}",
+```
+
 ### Using Docker Compose (Recommended)
 
 1. Create a `docker-compose.yml` file:
@@ -76,11 +97,13 @@ Create a `config.json` file with your Cloudflare configuration:
 ```yml
 services:
   ddns-updater:
-    build: .
+    image: aribasadme/cloudflare-ddns:latest
     volumes:
       - ./config.json:/app/config.json:ro
     environment:
       CF_DDNS_API_TOKEN: ${CF_DDNS_API_TOKEN}
+      CF_DDNS_ZONE_ID: ${CF_DDNS_ZONE_ID}
+      CHECK_INTERVAL: 900 # (optional) seconds
     restart: unless-stopped
 ```
 
@@ -92,23 +115,29 @@ docker-compose up -d
 
 ### Using Docker CLI
 
-1. Build the image:
-
-```sh
-docker build -t rpi-cloudflare-ddns .
-```
-
-2. Run the container:
+Run the container:
 
 ```sh
 docker run -d \
-  --name rpi-cloudflare-ddns \
+  --name cloudflare-ddns \
   --restart unless-stopped \
-  rpi-cloudflare-ddns
+  -e CF_DDNS_API_TOKEN=your_api_token \
+  -e CF_DDNS_ZONE_ID=your_zone_id \
+  -e CHECK_INTERVAL=900 \       # (optional) seconds
+  -v $(pwd)/config.json:/app/config.json:ro \
+  aribasadme/cloudflare-ddns:latest
 ```
 
-## Environment Variables
-- Define environmental variables starts with `CF_DDNS_` and use it in config.json (Example: `CF_DDNS_API_TOKEN`)
+or if using a `.env` file:
+
+```sh
+docker run -d \
+  --name cloudflare-ddns \
+  --restart unless-stopped \
+  --env-file .env \
+  -v $(pwd)/config.json:/app/config.json:ro \
+  aribasadme/cloudflare-ddns:latest
+```
 
 ## Monitoring
 
@@ -117,9 +146,9 @@ docker run -d \
 View container logs:
 
 ```sh
-docker logs rpi-cloudflare-ddns
+docker logs cloudflare-ddns
 # or follow the logs
-docker logs -f rpi-cloudflare-ddns
+docker logs -f cloudflare-ddns
 ```
 
 ## Troubleshooting
