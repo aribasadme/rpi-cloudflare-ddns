@@ -7,5 +7,3 @@ venv/
 
 # Python
 __pycache__
-*.log
-ip.txt
