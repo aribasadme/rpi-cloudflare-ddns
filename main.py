@@ -35,7 +35,7 @@ class DnsUpdateRequest:
     record_id: str
     record_type: str
     proxied: bool
-    current_content: str
+    content: str
 
 
 def setup_logging(log_level=logging.INFO) -> None:
@@ -181,7 +181,7 @@ def prepare_updates(
                         record_id=record.id,
                         record_type=record.type,
                         proxied=proxied,
-                        current_content=record.content,
+                        content=record.content,
                     )
                 )
 
@@ -214,8 +214,9 @@ def update_records(cf: Cloudflare, updates: List[DnsUpdateRequest], ip: str, ttl
                         ttl=ttl,
                         comment=f"Updated by rpi-cloudflare-ddns on {datetime.now()}",
                     )
-                    logger.info(
-                        f"Updated {update.fqdn} from {update.current_content} to {ip}"
+                    logger.info(f"Updated {update.fqdn} from {update.content} to {ip}")
+                    logger.debug(
+                        f"Updated {update.fqdn} from {update.content} to {ip} (type: {update.record_type}, proxied: {update.proxied}, ttl: {ttl})"
                     )
                 except Exception as e:
                     logger.error(f"Failed to update {update.fqdn}: {str(e)}")
