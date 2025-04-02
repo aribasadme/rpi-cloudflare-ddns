@@ -231,7 +231,7 @@ def run() -> None:
     try:
         config = load_configuration()
         ttl = int(config.get("ttl", 300))
-        check_interval = os.environ.get("CHECK_INTERVAL", 900)
+        check_interval = int(os.environ.get("CHECK_INTERVAL", 900))
         logger.info(f"Starting periodic checks every {check_interval} seconds")
 
         last_known_ip: Optional[str] = None
@@ -274,6 +274,7 @@ def run() -> None:
                 else:
                     logger.info(f"No IP change detected. Current IP: {ip}")
 
+                logger.info("Sleeping...")
                 time.sleep(check_interval)
 
             except Exception as e:
