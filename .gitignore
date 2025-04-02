@@ -1,9 +1,13 @@
-# Environment
-.env
-venv/
-
-# Visual Studio Code
+# IDEs and editors
 .vscode
 
 # Python
-__pycache__
+__pycache__/
+venv/
+.venv/
+
+# Project specific
+.env
+
+# Misc
+.DS_Store
