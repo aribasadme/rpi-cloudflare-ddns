@@ -1,0 +1,30 @@
+# Version control
+.git/
+.gitignore
+
+# Python
+__pycache__/
+venv/
+.venv/
+
+# IDEs and editors
+.vscode/
+
+# Docker
+Dockerfile
+.docker
+.dockerignore
+
+# Project specific
+.env
+
+# Documentation
+docs/
+*.md
+LICENSE
+
+# CI/CD
+.github/
+
+# Misc
+.DS_Store
