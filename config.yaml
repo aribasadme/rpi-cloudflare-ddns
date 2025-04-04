@@ -1,0 +1,12 @@
+cloudflare:
+  - authentication:
+      api_token: "your-cloudflare-api-token"
+    zone_id: "your-zone-id"
+    subdomains:
+      - name: "@" # root domain (example.com)
+        proxied: false
+      - name: "foo" # subdomain (foo.example.com)
+        proxied: false
+      - name: "bar" # subdomain (bar.example.com)
+        proxied: false
+ttl: 300
