@@ -30,19 +30,30 @@ If you need to update other record types (like CNAME, MX, etc.) or require addit
 
 ## Configuration
 
-Create either `config.yaml` or `config.yml` file with your Cloudflare configuration:
+Create a `config.json` file with your Cloudflare configuration:
 
-```yml
-cloudflare:
-  - authentication:
-      api_token: "your-cloudflare-api-token"
-    zone_id: "your-zone-id"
-    subdomains:
-      - name: "@"
-        proxied: false
-      - name: "foo"
-        proxied: false
-ttl: 300
+```json
+{
+    "ttl": 300,
+    "cloudflare": [
+        {
+            "authentication": {
+                "api_token": "your-cloudflare-api-token"
+            },
+            "zone_id": "your-zone-id",
+            "subdomains": [
+                {
+                    "name": "@",
+                    "proxied": true
+                },
+                {
+                    "name": "www",
+                    "proxied": true
+                }
+            ]
+        }
+    ]
+}
 ```
 
 ### Configuration Parameters
@@ -58,7 +69,7 @@ ttl: 300
 ## Docker Deployment
 
 ### Environment Variables
-- You can define environmental variables that starts with `CF_DDNS_` and use it in config.yaml (Example: `CF_DDNS_API_TOKEN`).
+- You can define environmental variables that starts with `CF_DDNS_` and use it in config.json (Example: `CF_DDNS_API_TOKEN`).
 ```bash
 export CF_DDNS_API_TOKEN=your_cloudflare_api_token
 ```
@@ -70,11 +81,13 @@ CF_DDNS_ZONE_ID=your_cloudflare_zone_id
 CHECK_INTERVAL=900
 ```
 
-- Then edit you `config.yaml` accordingly:
-```yml
-cloudflare:
-  - authentication:
-      api_token: "${CF_DDNS_API_TOKEN}"
+- Then edit you `config.json` accordingly:
+```json
+{
+  "cloudflare": [
+    {
+      "authentication": {
+        "api_token": "${CF_DDNS_API_TOKEN}",
 ```
 
 ### Using Docker Compose (Recommended)
@@ -86,7 +99,7 @@ services:
   ddns-updater:
     image: aribasadme/cloudflare-ddns:latest
     volumes:
-      - ./config.yaml:/app/config.yaml:ro
+      - ./config.json:/app/config.json:ro
     environment:
       CF_DDNS_API_TOKEN: ${CF_DDNS_API_TOKEN}
       CF_DDNS_ZONE_ID: ${CF_DDNS_ZONE_ID}
@@ -111,7 +124,7 @@ docker run -d \
   -e CF_DDNS_API_TOKEN=your_api_token \
   -e CF_DDNS_ZONE_ID=your_zone_id \
   -e CHECK_INTERVAL=900 \       # (optional) seconds
-  -v $(pwd)/config.yaml:/app/config.yaml:ro \
+  -v $(pwd)/config.json:/app/config.json:ro \
   aribasadme/cloudflare-ddns:latest
 ```
 
@@ -122,7 +135,7 @@ docker run -d \
   --name cloudflare-ddns \
   --restart unless-stopped \
   --env-file .env \
-  -v $(pwd)/config.yaml:/app/config.yaml:ro \
+  -v $(pwd)/config.json:/app/config.json:ro \
   aribasadme/cloudflare-ddns:latest
 ```
 
