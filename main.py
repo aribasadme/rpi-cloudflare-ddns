@@ -15,7 +15,7 @@ from typing import Any, Dict, List, Optional
 import yaml
 from cloudflare import Cloudflare
 from cloudflare._exceptions import NotFoundError
-from cloudflare.types.dns import AAAARecord, ARecord
+from cloudflare.types.dns import ARecord
 from dotenv import load_dotenv
 from schema import And, Or, Schema, SchemaError, Use
 from schema import Optional as SchemaOptional
@@ -244,9 +244,7 @@ def fetch_records(cf: Cloudflare, zone_id: str) -> list[Dict]:
         records = cf.dns.records.list(zone_id=zone_id)
         for record in records:
             logger.debug(f"Record: {record}")
-        return [
-            record for record in records if isinstance(record, (ARecord, AAAARecord))
-        ]
+        return [record for record in records if isinstance(record, ARecord)]
     except Exception as e:
         logger.error(f"Error fetching records for zone {zone_id}: {str(e)}")
         return []
