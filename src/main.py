@@ -58,10 +58,7 @@ class DnsUpdateRequest:
 
 
 def setup_logging(log_level=logging.INFO) -> None:
-    """
-    Configure logging to stdout/stderr.
-    Should be called at the start of the application.
-    """
+    """Configures application logging with standard format and handlers."""
     logging.getLogger().setLevel(logging.WARNING)
 
     logger.setLevel(log_level)
@@ -85,16 +82,12 @@ def setup_logging(log_level=logging.INFO) -> None:
 
 
 def load_configuration() -> Dict[str, Any]:
-    """
-    Loads configuration
-
-    Returns:
-        Dict[str, Any]: The parsed configuration dictionary
-
+    """Loads and validates configuration from YAML file.
+    
     Raises:
-        FileNotFoundError: If config file doesn't exist
-        yaml.YAMLError: If YAML parsing fails
-        SchemaError: If configuration doesn't match expected schema
+        FileNotFoundError: Config file not found
+        yaml.YAMLError: Invalid YAML syntax
+        SchemaError: Invalid configuration schema
     """
     config_extensions = ["yaml", "yml"]
     config_path = None
@@ -128,64 +121,36 @@ def load_configuration() -> Dict[str, Any]:
         raise
 
 
-def validate_configuration(config: dict) -> list[dict]:
+def validate_configuration(cf_config: dict, cf: Cloudflare) -> dict:
+    """Validates Cloudflare zone access and enriches config with zone data.
+    
+    Returns:
+        dict: Validated config with zone info, or empty dict if validation fails
     """
-    Validates the Cloudflare configuration by checking zone access
-    Returns a list of valid configurations
-    """
-    valid_configs = []
+    zone_id = cf_config.get("zone_id", "")
 
+    # Try to fetch the zone - this will fail if zone_id is invalid
+    # or if we don't have proper access
     try:
-        for cf_config in config["cloudflare"]:
-            try:
-                auth_config = cf_config.get("authentication", {})
-                cf = get_cloudflare_client(auth_config)
-                zone_id = cf_config["zone_id"]
+        zone = cf.zones.get(zone_id=zone_id)
 
-                # Try to fetch the zone - this will fail if zone_id is invalid
-                # or if we don't have proper access
-                try:
-                    zone = cf.zones.get(zone_id=zone_id)
+        cf_config["zone_name"] = zone.name
+        cf_config["client"] = cf
 
-                    cf_config["zone_name"] = zone.name
-                    cf_config["client"] = cf
+        logger.info(f"Successfully validated zone: {zone.name} ({zone_id})")
+        
+        return cf_config
 
-                    valid_configs.append(cf_config)
-                    logger.info(f"Successfully validated zone: {zone.name} ({zone_id})")
-
-                except NotFoundError:
-                    logger.error(f"Zone not found: {zone_id}")
-                    continue
-
-            except Exception as e:
-                logger.error(
-                    f"Failed to validate zone '{cf_config.get('zone_id')}': {str(e)}"
-                )
-                continue
-
-        if not valid_configs:
-            logger.error("No valid zones found in configuration")
-        else:
-            logger.info(f"Found {len(valid_configs)} valid zone(s)")
-
-        return valid_configs
-
-    except Exception as e:
-        logger.error(f"Configuration validation failed: {str(e)}")
-        return []
+    except NotFoundError:
+        logger.error(f"Zone not found: {zone_id}")
+        return {}
 
 
 def get_public_ip(timeout: int = 5) -> Optional[str]:
-    """
-    Retrieves the public IP address of the machine.
-
+    """Gets machine's public IP address from ipify.org.
+    
     Returns:
-        str: The public IP address
-
-    Raises:
-        URLError: If the connection to the IP service fails
-        TimeoutError: If the request times out
-
+        Optional[str]: Public IP address or None if request fails
     """
     public_ip = None
     try:
@@ -202,8 +167,10 @@ def get_public_ip(timeout: int = 5) -> Optional[str]:
 
 
 def get_cloudflare_client(auth_config: dict) -> Cloudflare:
-    """
-    Create a Cloudflare client based on the authentication method provided
+    """Creates Cloudflare client from environment variables or config.
+    
+    Raises:
+        ValueError: Invalid authentication configuration
     """
     # First try environment variables
     api_token = os.getenv("CF_DDNS_API_TOKEN")
@@ -230,15 +197,10 @@ def get_cloudflare_client(auth_config: dict) -> Cloudflare:
 
 
 def fetch_records(cf: Cloudflare, zone_id: str) -> list[Dict]:
-    """
-    Fetches all DNS records for the specified zone.
-
-    Args:
-        cf (Cloudflare): An instance of the Cloudflare class
-        zone_id (str): The ID of the Cloudflare zone
-
+    """Fetches A records for the specified Cloudflare zone.
+    
     Returns:
-        list: A list of only A or AAAA records
+        list[Dict]: List of A records or empty list on error
     """
     try:
         records = cf.dns.records.list(zone_id=zone_id)
@@ -253,16 +215,10 @@ def fetch_records(cf: Cloudflare, zone_id: str) -> list[Dict]:
 def prepare_updates(
     config: dict, records: List[Dict], ip: str
 ) -> List[DnsUpdateRequest]:
-    """
-    Prepares a list of records that need to be updated.
-
-    Args:
-        config (dict):
-        records (List[Dict]): List of records that need to be updated
-        new_ip (str): IP address for all records
-
+    """Identifies DNS records that need IP address updates.
+    
     Returns:
-        List[DnsUpdateRequest]:
+        List[DnsUpdateRequest]: Records requiring updates
     """
     updates: List[DnsUpdateRequest] = []
 
@@ -298,14 +254,9 @@ def prepare_updates(
 
 
 def update_records(cf: Cloudflare, updates: List[DnsUpdateRequest], ip: str, ttl: int):
-    """
-    Updates the DNS records for the specified domain.
-
-    Args:
-        cf (Cloudflare): An instance of the Cloudflare class
-        records (list): A list of DNS records to update
-        cf_config (dict): Options to be updated
-        ip (str): The new IP address to set for the DNS records
+    """Updates DNS records with new IP address.
+    
+    Handles updates per zone, logging success and failures.
     """
     for zone_id, zone_updates in groupby(updates, key=attrgetter("zone_id")):
         zone_updates = list(zone_updates)
@@ -337,14 +288,23 @@ def update_records(cf: Cloudflare, updates: List[DnsUpdateRequest], ip: str, ttl
             continue
 
 
-def run() -> None:
-    """
-    Runs the DNS update check periodically
+def run() -> int:
+    """Main update loop that monitors IP changes and updates DNS records.
+    
+    Returns:
+        int: 0 on success, 1 on error
     """
     try:
         config = load_configuration()
+        
+        valid_configs = []
+        for cf_config in config["cloudflare"]:
+            auth_config = cf_config.get("authentication", {})
+            cf = get_cloudflare_client(auth_config)
+            valid_config = validate_configuration(cf_config, cf)
+            if valid_config:
+                valid_configs.append(valid_config)
 
-        valid_configs = validate_configuration(config)
         if not valid_configs:
             logger.error("No valid configurations found, exiting...")
             return 1
@@ -398,6 +358,11 @@ def run() -> None:
 
 
 def main():
+    """Application entry point with error handling.
+    
+    Returns:
+        int: Exit code (0: success, 1: error)
+    """
     try:
         logger = setup_logging()
         run()
