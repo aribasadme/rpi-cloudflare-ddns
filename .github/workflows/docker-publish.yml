@@ -2,8 +2,6 @@ name: Build and Publish Docker Image
 
 on:
   push:
-    branches:
-      - main
     tags:
       - "v*.*.*"
 
@@ -42,9 +40,6 @@ jobs:
           images: ${{ env.DOCKER_IMAGE }}
           tags: |
             type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
-            type=sha,format=long
             type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build and push Docker image
