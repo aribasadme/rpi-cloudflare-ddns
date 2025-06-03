@@ -1,5 +1,8 @@
 # Raspberry Pi Cloudflare DDNS Updater
 
+[![Tests](https://github.com/aribasadme/rpi-cloudflare-ddns/actions/workflows/test.yml/badge.svg)](https://github.com/aribasadme/rpi-cloudflare-ddns/actions/workflows/test.yml)
+[![codecov](https://codecov.io/gh/aribasadme/rpi-cloudflare-ddns/branch/main/graph/badge.svg)](https://codecov.io/gh/aribasadme/rpi-cloudflare-ddns)
+
 A Python-based Dynamic DNS updater for Cloudflare that automatically updates DNS records when your public IP address changes. Designed to be lightweight and containerized.
 
 ## Disclaimer
