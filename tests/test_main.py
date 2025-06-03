@@ -7,7 +7,7 @@ from cloudflare._exceptions import NotFoundError
 from cloudflare.types.dns import ARecord
 from schema import SchemaError
 
-from main import (
+from src.main import (
     DnsUpdateRequest,
     get_cloudflare_client,
     get_public_ip,
@@ -86,7 +86,7 @@ def valid_multiple_zones_config_file(tmp_path):
 
 
 def test_load_configuration_single_zone_valid(valid_single_zone_config_file):
-    with patch("main.BASE_PATH", valid_single_zone_config_file.parent):
+    with patch("src.main.BASE_PATH", valid_single_zone_config_file.parent):
         config = load_configuration()
         assert config["cloudflare"][0]["authentication"]["api_token"] == "test-token"
         assert config["cloudflare"][0]["zone_id"] == "test-zone"
@@ -94,7 +94,7 @@ def test_load_configuration_single_zone_valid(valid_single_zone_config_file):
 
 
 def test_load_configuration_multiple_zones_valid(valid_multiple_zones_config_file):
-    with patch("main.BASE_PATH", valid_multiple_zones_config_file.parent):
+    with patch("src.main.BASE_PATH", valid_multiple_zones_config_file.parent):
         config = load_configuration()
         assert config["cloudflare"][0]["authentication"]["api_token"] == "test-token-1"
         assert config["cloudflare"][0]["zone_id"] == "test-zone-1"
@@ -114,7 +114,7 @@ def test_load_configuration_schema_error(tmp_path):
     config_file = tmp_path / "config.yaml"
     config_file.write_text(INVALID_CONFIG)
 
-    with patch("main.BASE_PATH", config_file.parent):
+    with patch("src.main.BASE_PATH", config_file.parent):
         with pytest.raises(SchemaError):
             load_configuration()
 
