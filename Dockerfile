@@ -21,7 +21,7 @@ FROM base AS final
 WORKDIR /app
 
 COPY --from=dependencies /usr/local/lib/python3.12/site-packages/ /usr/local/lib/python3.12/site-packages/
-COPY main.py .
+COPY src/ .
 
 RUN chown -R ddns:ddns /app
 
@@ -35,4 +35,4 @@ ENTRYPOINT ["python"]
 CMD ["main.py"]
 
 LABEL description="Cloudflare DDNS Updater" \
-      version="1.0.0"
+      version="2.0.0"
