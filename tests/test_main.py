@@ -224,41 +224,69 @@ def test_prepare_updates_no_changes():
     assert len(updates) == 0
 
 
-def test_validate_configuration_no_valid_zones():
-    """Test when both zones are invalid"""
+def test_validate_configuration_zone_not_found():
+    """Test when a zone is invalid and not found"""
     config = {
-        "cloudflare": [
-            {
-                "authentication": {"api_token": "token1"},
-                "zone_id": "invalid_zone1",
-                "subdomains": [{"name": "test1"}],
-            },
-            {
-                "authentication": {"api_token": "token2"},
-                "zone_id": "invalid_zone2",
-                "subdomains": [{"name": "test2"}],
-            },
-        ]
+        "authentication": {"api_token": "token1"},
+        "zone_id": "abc123",
+        "subdomains": [{"name": "test1"}],
     }
 
     with patch("cloudflare.Cloudflare") as mock_cf_class:
         # Create a new mock client for each call to Cloudflare()
-        mock_client1 = Mock()
-        mock_client2 = Mock()
-        mock_cf_class.side_effect = [mock_client1, mock_client2]
+        mock_cf_client = Mock()
+        mock_cf_class.side_effect = mock_cf_client
 
         # Configure both clients to raise NotFoundError
-        mock_client1.zones.get.side_effect = NotFoundError(
-            message="Zone not found",
-            response=MockResponse(),
-            body={"success": False, "errors": [{"message": "Zone not found"}]},
-        )
-        mock_client2.zones.get.side_effect = NotFoundError(
+        mock_cf_client.zones.get.side_effect = NotFoundError(
             message="Zone not found",
             response=MockResponse(),
             body={"success": False, "errors": [{"message": "Zone not found"}]},
         )
 
-        valid_configs = validate_configuration(config)
+        valid_config = validate_configuration(config, mock_cf_client)
 
-        assert len(valid_configs) == 0
+        assert valid_config == {}
+
+def test_validate_configuration_zone_valid():
+    """Test when a zone is valid"""
+    config = {
+        "authentication": {"api_token": "token1"},
+        "zone_id": "abc123def456",
+        "subdomains": [{"name": "test1"}],
+    }
+
+    with patch("cloudflare.Cloudflare") as mock_cf_class:
+        mock_cf_client = Mock()
+        mock_cf_class.side_effect = mock_cf_client
+
+        # Create a mock zone with the name property
+        mock_zone = MockZone("example.com")
+        mock_cf_client.zones.get.return_value = mock_zone
+
+        valid_config = validate_configuration(config, mock_cf_client)
+        assert valid_config is not None
+        assert valid_config["zone_id"] == "abc123def456"
+        assert valid_config["zone_name"] == "example.com"
+        assert valid_config["client"] is not None
+
+def test_validate_configuration_zone_missing():
+    """Test when a zone is missing in the config"""
+    config = {
+        "authentication": {"api_token": "token1"},
+        "subdomains": [{"name": "test1"}],
+    }
+
+    with patch("cloudflare.Cloudflare") as mock_cf_class:
+        mock_cf_client = Mock()
+        mock_cf_class.side_effect = mock_cf_client
+
+        # Configure the client to raise NotFoundError for empty zone_id
+        mock_cf_client.zones.get.side_effect = NotFoundError(
+            message="Zone not found",
+            response=MockResponse(),
+            body={"success": False, "errors": [{"message": "Zone not found"}]},
+        )
+
+        valid_config = validate_configuration(config, mock_cf_client)
+        assert valid_config == {}

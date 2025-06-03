@@ -121,51 +121,29 @@ def load_configuration() -> Dict[str, Any]:
         raise
 
 
-def validate_configuration(config: dict) -> list[dict]:
+def validate_configuration(cf_config: dict, cf: Cloudflare) -> dict:
+    """Validates Cloudflare zone access and enriches config with zone data.
+    
+    Returns:
+        dict: Validated config with zone info, or empty dict if validation fails
     """
-    Validates the Cloudflare configuration by checking zone access
-    Returns a list of valid configurations
-    """
-    valid_configs = []
+    zone_id = cf_config.get("zone_id", "")
 
+    # Try to fetch the zone - this will fail if zone_id is invalid
+    # or if we don't have proper access
     try:
-        for cf_config in config["cloudflare"]:
-            try:
-                auth_config = cf_config.get("authentication", {})
-                cf = get_cloudflare_client(auth_config)
-                zone_id = cf_config["zone_id"]
+        zone = cf.zones.get(zone_id=zone_id)
 
-                # Try to fetch the zone - this will fail if zone_id is invalid
-                # or if we don't have proper access
-                try:
-                    zone = cf.zones.get(zone_id=zone_id)
+        cf_config["zone_name"] = zone.name
+        cf_config["client"] = cf
 
-                    cf_config["zone_name"] = zone.name
-                    cf_config["client"] = cf
+        logger.info(f"Successfully validated zone: {zone.name} ({zone_id})")
+        
+        return cf_config
 
-                    valid_configs.append(cf_config)
-                    logger.info(f"Successfully validated zone: {zone.name} ({zone_id})")
-
-                except NotFoundError:
-                    logger.error(f"Zone not found: {zone_id}")
-                    continue
-
-            except Exception as e:
-                logger.error(
-                    f"Failed to validate zone '{cf_config.get('zone_id')}': {str(e)}"
-                )
-                continue
-
-        if not valid_configs:
-            logger.error("No valid zones found in configuration")
-        else:
-            logger.info(f"Found {len(valid_configs)} valid zone(s)")
-
-        return valid_configs
-
-    except Exception as e:
-        logger.error(f"Configuration validation failed: {str(e)}")
-        return []
+    except NotFoundError:
+        logger.error(f"Zone not found: {zone_id}")
+        return {}
 
 
 def get_public_ip(timeout: int = 5) -> Optional[str]:
@@ -310,12 +288,23 @@ def update_records(cf: Cloudflare, updates: List[DnsUpdateRequest], ip: str, ttl
             continue
 
 
-def run() -> None:
-    """Main update loop that monitors IP changes and updates DNS records."""
+def run() -> int:
+    """Main update loop that monitors IP changes and updates DNS records.
+    
+    Returns:
+        int: 0 on success, 1 on error
+    """
     try:
         config = load_configuration()
+        
+        valid_configs = []
+        for cf_config in config["cloudflare"]:
+            auth_config = cf_config.get("authentication", {})
+            cf = get_cloudflare_client(auth_config)
+            valid_config = validate_configuration(cf_config, cf)
+            if valid_config:
+                valid_configs.append(valid_config)
 
-        valid_configs = validate_configuration(config, get_cloudflare_client(config["cloudflare"][0]["authentication"]))
         if not valid_configs:
             logger.error("No valid configurations found, exiting...")
             return 1
