@@ -83,7 +83,7 @@ def setup_logging(log_level=logging.INFO) -> None:
 
 def load_configuration() -> Dict[str, Any]:
     """Loads and validates configuration from YAML file.
-    
+
     Raises:
         FileNotFoundError: Config file not found
         yaml.YAMLError: Invalid YAML syntax
@@ -123,7 +123,7 @@ def load_configuration() -> Dict[str, Any]:
 
 def validate_configuration(cf_config: dict, cf: Cloudflare) -> dict:
     """Validates Cloudflare zone access and enriches config with zone data.
-    
+
     Returns:
         dict: Validated config with zone info, or empty dict if validation fails
     """
@@ -138,7 +138,7 @@ def validate_configuration(cf_config: dict, cf: Cloudflare) -> dict:
         cf_config["client"] = cf
 
         logger.info(f"Successfully validated zone: {zone.name} ({zone_id})")
-        
+
         return cf_config
 
     except NotFoundError:
@@ -148,7 +148,7 @@ def validate_configuration(cf_config: dict, cf: Cloudflare) -> dict:
 
 def get_public_ip(timeout: int = 5) -> Optional[str]:
     """Gets machine's public IP address from ipify.org.
-    
+
     Returns:
         Optional[str]: Public IP address or None if request fails
     """
@@ -168,7 +168,7 @@ def get_public_ip(timeout: int = 5) -> Optional[str]:
 
 def get_cloudflare_client(auth_config: dict) -> Cloudflare:
     """Creates Cloudflare client from environment variables or config.
-    
+
     Raises:
         ValueError: Invalid authentication configuration
     """
@@ -198,7 +198,7 @@ def get_cloudflare_client(auth_config: dict) -> Cloudflare:
 
 def fetch_records(cf: Cloudflare, zone_id: str) -> list[Dict]:
     """Fetches A records for the specified Cloudflare zone.
-    
+
     Returns:
         list[Dict]: List of A records or empty list on error
     """
@@ -216,7 +216,7 @@ def prepare_updates(
     config: dict, records: List[Dict], ip: str
 ) -> List[DnsUpdateRequest]:
     """Identifies DNS records that need IP address updates.
-    
+
     Returns:
         List[DnsUpdateRequest]: Records requiring updates
     """
@@ -255,7 +255,7 @@ def prepare_updates(
 
 def update_records(cf: Cloudflare, updates: List[DnsUpdateRequest], ip: str, ttl: int):
     """Updates DNS records with new IP address.
-    
+
     Handles updates per zone, logging success and failures.
     """
     for zone_id, zone_updates in groupby(updates, key=attrgetter("zone_id")):
@@ -290,13 +290,13 @@ def update_records(cf: Cloudflare, updates: List[DnsUpdateRequest], ip: str, ttl
 
 def run() -> int:
     """Main update loop that monitors IP changes and updates DNS records.
-    
+
     Returns:
         int: 0 on success, 1 on error
     """
     try:
         config = load_configuration()
-        
+
         valid_configs = []
         for cf_config in config["cloudflare"]:
             auth_config = cf_config.get("authentication", {})
@@ -359,7 +359,7 @@ def run() -> int:
 
 def main():
     """Application entry point with error handling.
-    
+
     Returns:
         int: Exit code (0: success, 1: error)
     """
