@@ -25,6 +25,10 @@ cloudflare:
     subdomains:
       - name: "test"
         proxied: true
+        ttl: 120
+      - name: "auto"
+        proxied: false
+        ttl: 1
 ttl: 300
 """
 
@@ -36,6 +40,7 @@ cloudflare:
     subdomains:
       - name: "foo"
         proxied: true
+        ttl: 120
   - authentication:
       api_token: "test-token-2"
     zone_id: "test-zone-2"
@@ -169,7 +174,7 @@ def test_prepare_updates():
         "zone_id": "test-zone",
         "zone_name": "example.com",
         "subdomains": [
-            {"name": "test", "proxied": True},
+            {"name": "test", "proxied": True, "ttl": 120},
             {"name": "@", "proxied": False},
         ],
     }
@@ -201,6 +206,8 @@ def test_prepare_updates():
     assert updates[0].fqdn == "test.example.com"
     assert updates[0].content == "1.1.1.1"
     assert updates[0].proxied is True
+    assert updates[0].ttl == 120
+    assert updates[1].ttl == 300
 
 
 def test_prepare_updates_no_changes():
@@ -248,6 +255,7 @@ def test_validate_configuration_zone_not_found():
 
         assert valid_config == {}
 
+
 def test_validate_configuration_zone_valid():
     """Test when a zone is valid"""
     config = {
@@ -270,6 +278,7 @@ def test_validate_configuration_zone_valid():
         assert valid_config["zone_name"] == "example.com"
         assert valid_config["client"] is not None
 
+
 def test_validate_configuration_zone_missing():
     """Test when a zone is missing in the config"""
     config = {
@@ -290,3 +299,81 @@ def test_validate_configuration_zone_missing():
 
         valid_config = validate_configuration(config, mock_cf_client)
         assert valid_config == {}
+
+
+def test_prepare_updates_with_ttl_precedence():
+    """Test TTL precedence (subdomain TTL vs global TTL)"""
+    config = {
+        "zone_id": "test-zone",
+        "zone_name": "example.com",
+        "ttl": 300,  # Global TTL
+        "subdomains": [
+            {"name": "specific", "proxied": False, "ttl": 120},  # Specific TTL
+            {"name": "auto", "proxied": False, "ttl": 1},  # Auto TTL
+            {"name": "global", "proxied": False},  # Uses global TTL
+        ],
+    }
+
+    records = [
+        ARecord(
+            id="record1",
+            name="specific.example.com",
+            type="A",
+            content="1.1.1.1",
+            proxied=False,
+        ),
+        ARecord(
+            id="record2",
+            name="auto.example.com",
+            type="A",
+            content="1.1.1.1",
+            proxied=False,
+        ),
+        ARecord(
+            id="record3",
+            name="global.example.com",
+            type="A",
+            content="1.1.1.1",
+            proxied=False,
+        ),
+    ]
+
+    new_ip = "2.2.2.2"
+
+    updates = prepare_updates(config, records, new_ip)
+
+    assert len(updates) == 3
+    # Check specific TTL subdomain
+    assert [u for u in updates if u.fqdn == "specific.example.com"][0].ttl == 120
+    # Check Auto TTL subdomain
+    assert [u for u in updates if u.fqdn == "auto.example.com"][0].ttl == 1
+    # Check global TTL subdomain
+    assert [u for u in updates if u.fqdn == "global.example.com"][0].ttl == 300
+
+
+def test_prepare_updates_with_default_ttl():
+    """Test TTL fallback to default when neither subdomain nor global TTL is set"""
+    config = {
+        "zone_id": "test-zone",
+        "zone_name": "example.com",
+        "subdomains": [
+            {"name": "test", "proxied": False},  # No TTL specified
+        ],
+    }
+
+    records = [
+        ARecord(
+            id="record1",
+            name="test.example.com",
+            type="A",
+            content="1.1.1.1",
+            proxied=False,
+        ),
+    ]
+
+    new_ip = "2.2.2.2"
+
+    updates = prepare_updates(config, records, new_ip)
+
+    assert len(updates) == 1
+    assert updates[0].ttl == 300  # Should use default TTL (300)

@@ -50,13 +50,32 @@ ttl: 300
 
 ### Configuration Parameters
 
-- `ttl`: Time-to-live for DNS records in seconds (defailts to 300)
+- `ttl`: Global time-to-live for DNS records in seconds (defaults to 300). Set to 1 for Auto TTL.
 - `cloudflare`: Array of zone configurations
     - `authentication.api_token`: Your Cloudflare API token
     - `zone_id`: Your Cloudflare zone ID
     - `subdomains`: Array of subdomain configurations
-        `name`: Subdomain name (use "@" or empty "" for root domain)
-        `proxied`: Whether to proxy through Cloudflare (true/false). Note: if `true`, sets TTL to Auto (300)
+        - `name`: Subdomain name (use "@" or empty "" for root domain)
+        - `proxied`: Whether to proxy through Cloudflare (true/false)
+        - `ttl`: (Optional) Time-to-live in seconds for this specific subdomain. Set to 1 for Auto TTL. If not set, uses the global TTL value.
+
+Example configuration with per-subdomain TTL:
+```yml
+cloudflare:
+  - authentication:
+      api_token: "your-cloudflare-api-token"
+    zone_id: "your-zone-id"
+    subdomains:
+      - name: "@"
+        proxied: false
+        ttl: 1  # Auto TTL for root domain
+      - name: "foo"
+        proxied: false
+        ttl: 120  # 2 minutes TTL for foo subdomain
+      - name: "bar"
+        proxied: false  # Will use global TTL
+ttl: 300  # Global TTL, used when not specified in subdomain
+```
 
 ## Docker Deployment
 

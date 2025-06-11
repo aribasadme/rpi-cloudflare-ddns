@@ -39,10 +39,18 @@ CONFIG_SCHEMA = Schema(
                     {"api_key": str, "api_email": str},
                 ),
                 "zone_id": str,
-                "subdomains": [{"name": str, SchemaOptional("proxied"): bool}],
+                "subdomains": [
+                    {
+                        "name": str,
+                        SchemaOptional("proxied"): bool,
+                        SchemaOptional("ttl"): And(
+                            Use(int), lambda n: (n == 1 or (60 <= n <= 86400))
+                        ),
+                    }
+                ],
             }
         ],
-        SchemaOptional("ttl"): And(Use(int), lambda n: 60 < n <= 86400),
+        SchemaOptional("ttl"): And(Use(int), lambda n: n == 1 or (60 <= n <= 86400)),
     }
 )
 
@@ -55,6 +63,7 @@ class DnsUpdateRequest:
     record_type: str
     proxied: bool
     content: str
+    ttl: int
 
 
 def setup_logging(log_level=logging.INFO) -> None:
@@ -83,7 +92,7 @@ def setup_logging(log_level=logging.INFO) -> None:
 
 def load_configuration() -> Dict[str, Any]:
     """Loads and validates configuration from YAML file.
-    
+
     Raises:
         FileNotFoundError: Config file not found
         yaml.YAMLError: Invalid YAML syntax
@@ -123,7 +132,7 @@ def load_configuration() -> Dict[str, Any]:
 
 def validate_configuration(cf_config: dict, cf: Cloudflare) -> dict:
     """Validates Cloudflare zone access and enriches config with zone data.
-    
+
     Returns:
         dict: Validated config with zone info, or empty dict if validation fails
     """
@@ -138,7 +147,7 @@ def validate_configuration(cf_config: dict, cf: Cloudflare) -> dict:
         cf_config["client"] = cf
 
         logger.info(f"Successfully validated zone: {zone.name} ({zone_id})")
-        
+
         return cf_config
 
     except NotFoundError:
@@ -148,7 +157,7 @@ def validate_configuration(cf_config: dict, cf: Cloudflare) -> dict:
 
 def get_public_ip(timeout: int = 5) -> Optional[str]:
     """Gets machine's public IP address from ipify.org.
-    
+
     Returns:
         Optional[str]: Public IP address or None if request fails
     """
@@ -168,7 +177,7 @@ def get_public_ip(timeout: int = 5) -> Optional[str]:
 
 def get_cloudflare_client(auth_config: dict) -> Cloudflare:
     """Creates Cloudflare client from environment variables or config.
-    
+
     Raises:
         ValueError: Invalid authentication configuration
     """
@@ -198,7 +207,7 @@ def get_cloudflare_client(auth_config: dict) -> Cloudflare:
 
 def fetch_records(cf: Cloudflare, zone_id: str) -> list[Dict]:
     """Fetches A records for the specified Cloudflare zone.
-    
+
     Returns:
         list[Dict]: List of A records or empty list on error
     """
@@ -216,7 +225,7 @@ def prepare_updates(
     config: dict, records: List[Dict], ip: str
 ) -> List[DnsUpdateRequest]:
     """Identifies DNS records that need IP address updates.
-    
+
     Returns:
         List[DnsUpdateRequest]: Records requiring updates
     """
@@ -231,7 +240,10 @@ def prepare_updates(
 
     for subdomain in config["subdomains"]:
         name = subdomain["name"].lower().strip()
-        proxied = subdomain["proxied"]
+        proxied = subdomain.get("proxied", False)
+        # Use subdomain TTL if set, otherwise use global TTL,
+        # default to 300 if neither is set
+        subdomain_ttl = subdomain.get("ttl", config.get("ttl", 300))
 
         fqdn = base_domain
         if name != "" and name != "@":
@@ -247,15 +259,16 @@ def prepare_updates(
                         record_type=record.type,
                         proxied=proxied,
                         content=record.content,
+                        ttl=subdomain_ttl,
                     )
                 )
 
     return updates
 
 
-def update_records(cf: Cloudflare, updates: List[DnsUpdateRequest], ip: str, ttl: int):
+def update_records(cf: Cloudflare, updates: List[DnsUpdateRequest], ip: str):
     """Updates DNS records with new IP address.
-    
+
     Handles updates per zone, logging success and failures.
     """
     for zone_id, zone_updates in groupby(updates, key=attrgetter("zone_id")):
@@ -271,13 +284,14 @@ def update_records(cf: Cloudflare, updates: List[DnsUpdateRequest], ip: str, ttl
                         name=update.fqdn,
                         type=update.record_type,
                         proxied=update.proxied,
-                        ttl=ttl,
+                        ttl=update.ttl,
                         comment=f"Updated by rpi-cloudflare-ddns on {datetime.now()}",
                     )
                     logger.info(f"Updated {update.fqdn} from {update.content} to {ip}")
                     logger.debug(
                         f"Updated {update.fqdn} from {update.content} to {ip} "
-                        f"(type: {update.record_type}, proxied: {update.proxied}, ttl: {ttl})"
+                        f"(type: {update.record_type}, proxied: {update.proxied}, "
+                        f"ttl: {update.ttl})"
                     )
                 except Exception as e:
                     logger.error(f"Failed to update {update.fqdn}: {str(e)}")
@@ -290,13 +304,13 @@ def update_records(cf: Cloudflare, updates: List[DnsUpdateRequest], ip: str, ttl
 
 def run() -> int:
     """Main update loop that monitors IP changes and updates DNS records.
-    
+
     Returns:
         int: 0 on success, 1 on error
     """
     try:
         config = load_configuration()
-        
+
         valid_configs = []
         for cf_config in config["cloudflare"]:
             auth_config = cf_config.get("authentication", {})
@@ -309,7 +323,6 @@ def run() -> int:
             logger.error("No valid configurations found, exiting...")
             return 1
 
-        ttl = int(config.get("ttl", 300))
         check_interval = int(os.environ.get("CHECK_INTERVAL", 900))
         logger.info(f"Starting periodic checks every {check_interval} seconds")
 
@@ -333,7 +346,7 @@ def run() -> int:
                             records = fetch_records(cf, zone_id)
                             updates = prepare_updates(cf_config, records, ip)
                             if updates:
-                                update_records(cf, updates, ip, ttl)
+                                update_records(cf, updates, ip)
                             else:
                                 logger.info("No records need updating")
 
@@ -359,7 +372,7 @@ def run() -> int:
 
 def main():
     """Application entry point with error handling.
-    
+
     Returns:
         int: Exit code (0: success, 1: error)
     """
