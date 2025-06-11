@@ -42,7 +42,7 @@ CONFIG_SCHEMA = Schema(
                 "subdomains": [{"name": str, SchemaOptional("proxied"): bool}],
             }
         ],
-        SchemaOptional("ttl"): And(Use(int), lambda n: 60 < n <= 86400),
+        SchemaOptional("ttl"): And(Use(int), lambda n: n == 1 or (60 < n <= 86400)),
     }
 )
 
