@@ -39,7 +39,15 @@ CONFIG_SCHEMA = Schema(
                     {"api_key": str, "api_email": str},
                 ),
                 "zone_id": str,
-                "subdomains": [{"name": str, SchemaOptional("proxied"): bool}],
+                "subdomains": [
+                    {
+                        "name": str,
+                        SchemaOptional("proxied"): bool,
+                        SchemaOptional("ttl"): And(
+                            Use(int), lambda n: (n == 1 or (60 < n <= 86400))
+                        ),
+                    }
+                ],
             }
         ],
         SchemaOptional("ttl"): And(Use(int), lambda n: n == 1 or (60 < n <= 86400)),
@@ -55,6 +63,7 @@ class DnsUpdateRequest:
     record_type: str
     proxied: bool
     content: str
+    ttl: int
 
 
 def setup_logging(log_level=logging.INFO) -> None:
@@ -231,7 +240,10 @@ def prepare_updates(
 
     for subdomain in config["subdomains"]:
         name = subdomain["name"].lower().strip()
-        proxied = subdomain["proxied"]
+        proxied = subdomain.get("proxied", False)
+        # Use subdomain TTL if set, otherwise use global TTL,
+        # default to 300 if neither is set
+        subdomain_ttl = subdomain.get("ttl", config.get("ttl", 300))
 
         fqdn = base_domain
         if name != "" and name != "@":
@@ -247,13 +259,14 @@ def prepare_updates(
                         record_type=record.type,
                         proxied=proxied,
                         content=record.content,
+                        ttl=subdomain_ttl,
                     )
                 )
 
     return updates
 
 
-def update_records(cf: Cloudflare, updates: List[DnsUpdateRequest], ip: str, ttl: int):
+def update_records(cf: Cloudflare, updates: List[DnsUpdateRequest], ip: str):
     """Updates DNS records with new IP address.
 
     Handles updates per zone, logging success and failures.
@@ -271,13 +284,14 @@ def update_records(cf: Cloudflare, updates: List[DnsUpdateRequest], ip: str, ttl
                         name=update.fqdn,
                         type=update.record_type,
                         proxied=update.proxied,
-                        ttl=ttl,
+                        ttl=update.ttl,
                         comment=f"Updated by rpi-cloudflare-ddns on {datetime.now()}",
                     )
                     logger.info(f"Updated {update.fqdn} from {update.content} to {ip}")
                     logger.debug(
                         f"Updated {update.fqdn} from {update.content} to {ip} "
-                        f"(type: {update.record_type}, proxied: {update.proxied}, ttl: {ttl})"
+                        f"(type: {update.record_type}, proxied: {update.proxied}, "
+                        f"ttl: {update.ttl})"
                     )
                 except Exception as e:
                     logger.error(f"Failed to update {update.fqdn}: {str(e)}")
@@ -309,7 +323,6 @@ def run() -> int:
             logger.error("No valid configurations found, exiting...")
             return 1
 
-        ttl = int(config.get("ttl", 300))
         check_interval = int(os.environ.get("CHECK_INTERVAL", 900))
         logger.info(f"Starting periodic checks every {check_interval} seconds")
 
@@ -333,7 +346,7 @@ def run() -> int:
                             records = fetch_records(cf, zone_id)
                             updates = prepare_updates(cf_config, records, ip)
                             if updates:
-                                update_records(cf, updates, ip, ttl)
+                                update_records(cf, updates, ip)
                             else:
                                 logger.info("No records need updating")
 
