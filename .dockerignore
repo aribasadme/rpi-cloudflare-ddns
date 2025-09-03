@@ -6,6 +6,8 @@
 __pycache__/
 venv/
 .venv/
+.pytest_cache/
+.ruff_cache/
 
 # IDEs and editors
 .vscode/
