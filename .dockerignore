@@ -1,35 +1,35 @@
-# Version control
-.git/
-.gitignore
-
-# Python
-__pycache__/
-venv/
-.venv/
-.pytest_cache/
-.ruff_cache/
-
-# IDEs and editors
-.vscode/
-
-# Docker
-Dockerfile
-.docker
-.dockerignore
-
-# Project specific
-.env
+# CI/CD
+.github/
 
 # Documentation
 docs/
 *.md
 LICENSE
-CHANGELOG.md
 
-# CI/CD
-.github/
+# Docker
+Dockerfile
+.dockerignore
+
+# IDEs and editors
+.vscode/
+
+# Python
+__pycache__/
+.pytest_cache/
+.coverage
+.ruff_cache/
+
+# Tests & Local development
+.env
+venv/
+.venv/
+tests/
+
+# Version control
+.git/
+.gitignore
+.pre-commit-config.yaml
 
 # Misc
 .DS_Store
 .envrc
-.pre-commit-config.yaml
