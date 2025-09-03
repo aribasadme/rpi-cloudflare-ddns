@@ -11,9 +11,6 @@ dependencies = [
     "schema==0.7.7",
 ]
 
-[tool.uv]
-default-groups = ["dev"]
-
 [dependency-groups]
 dev = [
     "pre-commit>=4.3.0",
