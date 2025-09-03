@@ -19,6 +19,7 @@ dev = [
     "pre-commit>=4.3.0",
     "pyright>=1.1.404",
     "pytest>=8.4.0",
+    "pytest-cov>=6.2.1",
 ]
 
 # Formatting / Linting
