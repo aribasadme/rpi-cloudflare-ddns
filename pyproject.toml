@@ -1,6 +1,6 @@
 [project]
 name = "rpi-cloudflare-ddns"
-version = "2.2.0"
+version = "2.3.0"
 description = "Python script to update DNS records with your current external IP using the Cloudflare API"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -11,14 +11,12 @@ dependencies = [
     "schema==0.7.7",
 ]
 
-[tool.uv]
-default-groups = ["dev"]
-
 [dependency-groups]
 dev = [
     "pre-commit>=4.3.0",
     "pyright>=1.1.404",
     "pytest>=8.4.0",
+    "pytest-cov>=6.2.1",
 ]
 
 # Formatting / Linting
@@ -43,7 +41,7 @@ exclude = [
 # Testing
 [tool.pytest.ini_options]
 pythonpath = [
-    ".",
+    "src",
 ]
 testpaths = [
     "tests",

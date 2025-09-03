@@ -1,10 +1,9 @@
-__version__ = "2.1.0"
+__version__ = "2.3.0"
 
 import logging
 import os
 import sys
 import time
-import urllib.request
 from dataclasses import dataclass
 from datetime import datetime
 from itertools import groupby
@@ -19,6 +18,8 @@ from cloudflare.types.dns import ARecord
 from dotenv import load_dotenv
 from schema import And, Or, Schema, SchemaError, Use
 from schema import Optional as SchemaOptional
+
+from ip_provider import IPProviderError, create_configured_ip_provider
 
 logger = logging.getLogger("ddns_updater")
 
@@ -153,26 +154,6 @@ def validate_configuration(cf_config: dict, cf: Cloudflare) -> dict:
     except NotFoundError:
         logger.error(f"Zone not found: {zone_id}")
         return {}
-
-
-def get_public_ip(timeout: int = 5) -> Optional[str]:
-    """Gets machine's public IP address from ipify.org.
-
-    Returns:
-        Optional[str]: Public IP address or None if request fails
-    """
-    public_ip = None
-    try:
-        url = "https://api.ipify.org"  # IPv4 only
-        response = urllib.request.urlopen(url, timeout=timeout)
-        public_ip = response.read().decode("utf-8")
-        logger.info(f"Public IP: {public_ip}")
-    except urllib.error.URLError as e:
-        logger.error(f"Connection error: {e}")
-    except TimeoutError:
-        logger.error(f"Request timed out after {timeout} seconds")
-    finally:
-        return public_ip
 
 
 def get_cloudflare_client(auth_config: dict) -> Cloudflare:
@@ -323,6 +304,9 @@ def run() -> int:
             logger.error("No valid configurations found, exiting...")
             return 1
 
+        logger.info("Initializing IP provider...")
+        ip_provider = create_configured_ip_provider()
+
         check_interval = int(os.environ.get("CHECK_INTERVAL", 900))
         logger.info(f"Starting periodic checks every {check_interval} seconds")
 
@@ -330,14 +314,17 @@ def run() -> int:
 
         while True:
             try:
-                ip = get_public_ip()
-                if not ip:
-                    logger.error("Failed to obtain public IP")
+                try:
+                    ip = ip_provider.get_public_ip()
+                except IPProviderError as e:
+                    logger.error(f"Failed to obtain public IP: {e}")
                     time.sleep(check_interval)
                     continue
 
                 if ip != last_known_ip:
                     logger.info(f"Public IP changed from {last_known_ip} to {ip}")
+
+                    # Process each configuration
                     for cf_config in valid_configs:
                         try:
                             cf = cf_config["client"]
@@ -345,25 +332,33 @@ def run() -> int:
 
                             records = fetch_records(cf, zone_id)
                             updates = prepare_updates(cf_config, records, ip)
+
                             if updates:
                                 update_records(cf, updates, ip)
+                                logger.info(f"Updated {len(updates)} DNS records")
                             else:
-                                logger.info("No records need updating")
+                                logger.debug("No records need updating for this zone")
 
                         except Exception as e:
-                            logger.error(f"Error processing configuration: {str(e)}")
+                            logger.error(
+                                f"Error processing zone {cf_config.get('zone_id', 'unknown')}: {e}"
+                            )
                             continue
 
                     last_known_ip = ip
                 else:
-                    logger.info(f"No IP change detected. Current IP: {ip}")
+                    logger.debug(f"No IP change detected. Current IP: {ip}")
 
-                logger.info("Sleeping...")
                 time.sleep(check_interval)
 
+            except KeyboardInterrupt:
+                logger.info("Application stopped by user")
+                break
             except Exception as e:
                 logger.error(f"Error in check cycle: {str(e)}")
                 time.sleep(check_interval)
+
+        return 0
 
     except Exception as e:
         logger.error(f"Application error: {str(e)}")
@@ -378,6 +373,7 @@ def main():
     """
     try:
         logger = setup_logging()
+        logger.info(f"rpi-cloudflare-ddns version {__version__} starting...")
         run()
         return 0
     except KeyboardInterrupt:

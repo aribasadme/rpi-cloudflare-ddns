@@ -7,10 +7,9 @@ from cloudflare._exceptions import NotFoundError
 from cloudflare.types.dns import ARecord
 from schema import SchemaError
 
-from src.main import (
+from main import (
     DnsUpdateRequest,
     get_cloudflare_client,
-    get_public_ip,
     load_configuration,
     prepare_updates,
     validate_configuration,
@@ -91,7 +90,7 @@ def valid_multiple_zones_config_file(tmp_path):
 
 
 def test_load_configuration_single_zone_valid(valid_single_zone_config_file):
-    with patch("src.main.BASE_PATH", valid_single_zone_config_file.parent):
+    with patch("main.BASE_PATH", valid_single_zone_config_file.parent):
         config = load_configuration()
         assert config["cloudflare"][0]["authentication"]["api_token"] == "test-token"
         assert config["cloudflare"][0]["zone_id"] == "test-zone"
@@ -99,7 +98,7 @@ def test_load_configuration_single_zone_valid(valid_single_zone_config_file):
 
 
 def test_load_configuration_multiple_zones_valid(valid_multiple_zones_config_file):
-    with patch("src.main.BASE_PATH", valid_multiple_zones_config_file.parent):
+    with patch("main.BASE_PATH", valid_multiple_zones_config_file.parent):
         config = load_configuration()
         assert config["cloudflare"][0]["authentication"]["api_token"] == "test-token-1"
         assert config["cloudflare"][0]["zone_id"] == "test-zone-1"
@@ -119,7 +118,7 @@ def test_load_configuration_schema_error(tmp_path):
     config_file = tmp_path / "config.yaml"
     config_file.write_text(INVALID_CONFIG)
 
-    with patch("src.main.BASE_PATH", config_file.parent):
+    with patch("main.BASE_PATH", config_file.parent):
         with pytest.raises(SchemaError):
             load_configuration()
 
@@ -128,24 +127,6 @@ def test_load_configuration_file_not_found():
     with patch("os.path.exists", return_value=False):
         with pytest.raises(FileNotFoundError):
             load_configuration()
-
-
-@pytest.mark.parametrize(
-    "mock_response,expected",
-    [
-        (b"1.2.3.4", "1.2.3.4"),
-        (Exception(), None),
-    ],
-)
-def test_get_public_ip(mock_response, expected):
-    with patch("urllib.request.urlopen") as mock_urlopen:
-        if isinstance(mock_response, Exception):
-            mock_urlopen.side_effect = mock_response
-        else:
-            mock_urlopen.return_value.read.return_value = mock_response
-
-        result = get_public_ip()
-        assert result == expected
 
 
 def test_get_cloudflare_client_with_token():
