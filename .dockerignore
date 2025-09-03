@@ -22,9 +22,12 @@ Dockerfile
 docs/
 *.md
 LICENSE
+CHANGELOG.md
 
 # CI/CD
 .github/
 
 # Misc
 .DS_Store
+.envrc
+.pre-commit-config.yaml
