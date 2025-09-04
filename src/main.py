@@ -8,17 +8,18 @@ from dataclasses import dataclass
 from datetime import datetime
 from itertools import groupby
 from operator import attrgetter
-from string import Template
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
-import yaml
 from cloudflare import Cloudflare
-from cloudflare._exceptions import NotFoundError
-from cloudflare.types.dns import ARecord
+from cloudflare.types.dns.record_response import A
 from dotenv import load_dotenv
-from schema import And, Or, Schema, SchemaError, Use
-from schema import Optional as SchemaOptional
+from typing_extensions import Literal
 
+from configuration_manager import (
+    CloudflareZoneConfig,
+    ConfigurationError,
+    create_configuration_manager,
+)
 from ip_provider import IPProviderError, create_configured_ip_provider
 
 logger = logging.getLogger("ddns_updater")
@@ -31,43 +32,19 @@ ENV_VARS = {
 
 BASE_PATH = os.getcwd()
 
-CONFIG_SCHEMA = Schema(
-    {
-        "cloudflare": [
-            {
-                "authentication": Or(
-                    {"api_token": str},
-                    {"api_key": str, "api_email": str},
-                ),
-                "zone_id": str,
-                "subdomains": [
-                    {
-                        "name": str,
-                        SchemaOptional("proxied"): bool,
-                        SchemaOptional("ttl"): And(
-                            Use(int), lambda n: (n == 1 or (60 <= n <= 86400))
-                        ),
-                    }
-                ],
-            }
-        ],
-        SchemaOptional("ttl"): And(Use(int), lambda n: n == 1 or (60 <= n <= 86400)),
-    }
-)
-
 
 @dataclass
 class DnsUpdateRequest:
     zone_id: str
     fqdn: str
     record_id: str
-    record_type: str
+    record_type: Optional[Literal["A"]]
     proxied: bool
     content: str
     ttl: int
 
 
-def setup_logging(log_level=logging.INFO) -> None:
+def setup_logging(log_level=logging.INFO):
     """Configures application logging with standard format and handlers."""
     logging.getLogger().setLevel(logging.WARNING)
 
@@ -89,71 +66,6 @@ def setup_logging(log_level=logging.INFO) -> None:
     logging.getLogger("cloudflare").setLevel(logging.WARNING)
 
     return logger
-
-
-def load_configuration() -> Dict[str, Any]:
-    """Loads and validates configuration from YAML file.
-
-    Raises:
-        FileNotFoundError: Config file not found
-        yaml.YAMLError: Invalid YAML syntax
-        SchemaError: Invalid configuration schema
-    """
-    config_extensions = ["yaml", "yml"]
-    config_path = None
-
-    for ext in config_extensions:
-        path = os.path.join(BASE_PATH, f"config.{ext}")
-        if os.path.exists(path):
-            config_path = path
-            break
-
-    if not config_path:
-        raise FileNotFoundError(
-            f"Configuration file not found. Tried: {', '.join(f'config.{ext}' for ext in config_extensions)}"
-        )
-
-    try:
-        with open(config_path, "r") as config_file:
-            config = yaml.safe_load(
-                Template(config_file.read()).safe_substitute(ENV_VARS)
-            )
-
-            CONFIG_SCHEMA.validate(config)
-
-            logger.info(f"Loaded configuration from {config_path}")
-            return config
-    except yaml.YAMLError as e:
-        logger.error(f"Invalid YAML in config file: {str(e)}")
-        raise
-    except SchemaError as e:
-        logger.error(f"Configuration validation failed: {str(e)}")
-        raise
-
-
-def validate_configuration(cf_config: dict, cf: Cloudflare) -> dict:
-    """Validates Cloudflare zone access and enriches config with zone data.
-
-    Returns:
-        dict: Validated config with zone info, or empty dict if validation fails
-    """
-    zone_id = cf_config.get("zone_id", "")
-
-    # Try to fetch the zone - this will fail if zone_id is invalid
-    # or if we don't have proper access
-    try:
-        zone = cf.zones.get(zone_id=zone_id)
-
-        cf_config["zone_name"] = zone.name
-        cf_config["client"] = cf
-
-        logger.info(f"Successfully validated zone: {zone.name} ({zone_id})")
-
-        return cf_config
-
-    except NotFoundError:
-        logger.error(f"Zone not found: {zone_id}")
-        return {}
 
 
 def get_cloudflare_client(auth_config: dict) -> Cloudflare:
@@ -186,52 +98,62 @@ def get_cloudflare_client(auth_config: dict) -> Cloudflare:
         )
 
 
-def fetch_records(cf: Cloudflare, zone_id: str) -> list[Dict]:
+def fetch_records(cf: Cloudflare, zone_id: str) -> list[A]:
     """Fetches A records for the specified Cloudflare zone.
 
     Returns:
-        list[Dict]: List of A records or empty list on error
+        list[A]: List of A records or empty list on error
     """
     try:
         records = cf.dns.records.list(zone_id=zone_id)
-        for record in records:
+        a_records = [record for record in records if isinstance(record, A)]
+        for record in a_records:
             logger.debug(f"Record: {record}")
-        return [record for record in records if isinstance(record, ARecord)]
+        return a_records
     except Exception as e:
         logger.error(f"Error fetching records for zone {zone_id}: {str(e)}")
         return []
 
 
 def prepare_updates(
-    config: dict, records: List[Dict], ip: str
+    zone_config: CloudflareZoneConfig, records: List[A], new_ip: str
 ) -> List[DnsUpdateRequest]:
     """Identifies DNS records that need IP address updates.
+
+    Args:
+        zone_config: CloudflareZoneConfig dataclass
+        records: List of DNS records
+        new_ip: New IP address to set
 
     Returns:
         List[DnsUpdateRequest]: Records requiring updates
     """
     updates: List[DnsUpdateRequest] = []
 
-    zone_id = config["zone_id"]
-    base_domain = config["zone_name"]
+    zone_id = zone_config.zone_id
+    base_domain = str(zone_config.zone_name)
 
-    record_map: Dict[str, Dict] = {}
+    # Create lookup map for existing A records
+    record_map: Dict[str, A] = {}
     for record in records:
-        record_map[record.name.lower()] = record
+        if record.name is not None:
+            record_map[record.name.lower()] = record
 
-    for subdomain in config["subdomains"]:
-        name = subdomain["name"].lower().strip()
-        proxied = subdomain.get("proxied", False)
-        # Use subdomain TTL if set, otherwise use global TTL,
-        # default to 300 if neither is set
-        subdomain_ttl = subdomain.get("ttl", config.get("ttl", 300))
+    # Check each configured subdomain
+    for subdomain_config in zone_config.subdomains:
+        name = subdomain_config.name.lower().strip()
+        proxied = subdomain_config.proxied
 
+        effective_ttl = zone_config.get_effective_ttl(subdomain_config)
+
+        # Build FQDN
         fqdn = base_domain
         if name != "" and name != "@":
             fqdn = f"{name}.{base_domain}"
 
+        # Check if record exists and needs updating
         if record := record_map.get(fqdn):
-            if record.content != ip:
+            if record.content != new_ip:
                 updates.append(
                     DnsUpdateRequest(
                         zone_id=zone_id,
@@ -239,10 +161,15 @@ def prepare_updates(
                         record_id=record.id,
                         record_type=record.type,
                         proxied=proxied,
-                        content=record.content,
-                        ttl=subdomain_ttl,
+                        content=str(record.content),  # Current content
+                        ttl=effective_ttl,
                     )
                 )
+                logger.debug(
+                    f"Queued update: {fqdn} ({record.content} → {new_ip}, TTL={effective_ttl})"
+                )
+        else:
+            logger.warning(f"DNS record not found: {fqdn}")
 
     return updates
 
@@ -258,12 +185,12 @@ def update_records(cf: Cloudflare, updates: List[DnsUpdateRequest], ip: str):
         try:
             for update in zone_updates:
                 try:
-                    cf.dns.records.update(
+                    cf.dns.records.update(  # type: ignore
                         dns_record_id=update.record_id,
                         zone_id=zone_id,
                         content=ip,
                         name=update.fqdn,
-                        type=update.record_type,
+                        type=update.record_type,  # type: ignore
                         proxied=update.proxied,
                         ttl=update.ttl,
                         comment=f"Updated by rpi-cloudflare-ddns on {datetime.now()}",
@@ -283,6 +210,41 @@ def update_records(cf: Cloudflare, updates: List[DnsUpdateRequest], ip: str):
             continue
 
 
+def _auth_config_to_dict(auth_config) -> Dict[str, Optional[str]]:
+    """Convert AuthenticationConfig dataclass to dict for existing functions"""
+    return {
+        "api_token": auth_config.api_token,
+        "api_key": auth_config.api_key,
+        "api_email": auth_config.api_email,
+    }
+
+
+def validate_configuration(
+    cf, zone_config: CloudflareZoneConfig
+) -> Optional[CloudflareZoneConfig]:
+    """Validates Cloudflare zone access and enriches config with zone data.
+
+    Args:
+        cf: Cloudflare client
+        zone_config: CloudflareZoneConfig dataclass
+
+    Returns:
+        CloudflareZoneConfig with populated zone_name and client, or None if validation fails
+    """
+    try:
+        zone = cf.zones.get(zone_id=zone_config.zone_id)
+
+        # Populate runtime fields
+        zone_config.zone_name = zone.name
+        zone_config.client = cf
+
+        return zone_config
+
+    except Exception as e:
+        logger.error(f"Zone validation failed for {zone_config.zone_id}: {e}")
+        return None
+
+
 def run() -> int:
     """Main update loop that monitors IP changes and updates DNS records.
 
@@ -290,19 +252,42 @@ def run() -> int:
         int: 0 on success, 1 on error
     """
     try:
-        config = load_configuration()
+        logger.info("Loading configuration...")
+        config_manager = create_configuration_manager()
 
-        valid_configs = []
-        for cf_config in config["cloudflare"]:
-            auth_config = cf_config.get("authentication", {})
-            cf = get_cloudflare_client(auth_config)
-            valid_config = validate_configuration(cf_config, cf)
-            if valid_config:
-                valid_configs.append(valid_config)
-
-        if not valid_configs:
-            logger.error("No valid configurations found, exiting...")
+        try:
+            config = config_manager.load_configuration()
+        except ConfigurationError as e:
+            logger.error(f"Configuration error: {e}")
             return 1
+
+        logger.info("Validating Cloudflare zones...")
+        valid_zones = []
+
+        for zone_config in config.cloudflare_zones:
+            try:
+                # Convert authentication dataclass back to dict for existing function
+                auth_dict = _auth_config_to_dict(zone_config.authentication)
+                cf = get_cloudflare_client(auth_dict)
+
+                # Validate the zone (this populates zone_name and client)
+                validated_zone = validate_configuration(cf, zone_config)
+                if validated_zone:
+                    valid_zones.append(validated_zone)
+                    logger.info(
+                        f"✓ Validated zone: {validated_zone.zone_name} ({validated_zone.zone_id})"
+                    )
+                else:
+                    logger.warning(f"✗ Failed to validate zone: {zone_config.zone_id}")
+            except Exception as e:
+                logger.error(f"Error setting up zone {zone_config.zone_id}: {e}")
+                continue
+
+        if not valid_zones:
+            logger.error("No valid zones configured, exiting...")
+            return 1
+
+        logger.info(f"Successfully configured {len(valid_zones)} zones")
 
         logger.info("Initializing IP provider...")
         ip_provider = create_configured_ip_provider()
@@ -314,6 +299,7 @@ def run() -> int:
 
         while True:
             try:
+                # Get current IP
                 try:
                     ip = ip_provider.get_public_ip()
                 except IPProviderError as e:
@@ -321,27 +307,34 @@ def run() -> int:
                     time.sleep(check_interval)
                     continue
 
+                # Check if IP changed
                 if ip != last_known_ip:
                     logger.info(f"Public IP changed from {last_known_ip} to {ip}")
 
                     # Process each configuration
-                    for cf_config in valid_configs:
+                    for zone_config in valid_zones:
                         try:
-                            cf = cf_config["client"]
-                            zone_id = cf_config["zone_id"]
+                            cf = zone_config.client
+                            zone_id = zone_config.zone_id
+
+                            logger.debug(f"Processing zone: {zone_config.zone_name}")
 
                             records = fetch_records(cf, zone_id)
-                            updates = prepare_updates(cf_config, records, ip)
+                            updates = prepare_updates(zone_config, records, ip)
 
                             if updates:
                                 update_records(cf, updates, ip)
-                                logger.info(f"Updated {len(updates)} DNS records")
+                                logger.info(
+                                    f"Updated {len(updates)} DNS records for {zone_config.zone_name}"
+                                )
                             else:
-                                logger.debug("No records need updating for this zone")
+                                logger.debug(
+                                    f"No records need updating for {zone_config.zone_name}"
+                                )
 
                         except Exception as e:
                             logger.error(
-                                f"Error processing zone {cf_config.get('zone_id', 'unknown')}: {e}"
+                                f"Error processing zone {zone_config.zone_name}: {e}"
                             )
                             continue
 
@@ -373,9 +366,12 @@ def main():
     """
     try:
         logger = setup_logging()
+
         logger.info(f"rpi-cloudflare-ddns version {__version__} starting...")
-        run()
-        return 0
+
+        result = run()
+        return result
+
     except KeyboardInterrupt:
         logger.info("Application stopped by user")
         return 0
@@ -384,5 +380,15 @@ def main():
         return 1
 
 
+def validate_config_command():
+    """Simple wrapper that calls the validation from configuration_manager"""
+    from configuration_manager import validate_configuration_command
+
+    return validate_configuration_command()
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    if len(sys.argv) > 1 and sys.argv[1] == "--validate":
+        sys.exit(validate_config_command())
+    else:
+        sys.exit(main())
