@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+import yaml
 
 # Import the modules we're testing
 from configuration_manager import (
@@ -744,3 +745,95 @@ class TestSampleConfiguration:
         assert isinstance(sample, str)
         # Default should be YAML (with comments)
         assert "# " in sample
+
+
+class TestIntegration:
+    """Integration tests"""
+
+    def test_yaml_to_json_equivalence(self, temp_dir, sample_config_dict):
+        """Test that YAML and JSON configs produce equivalent results"""
+        # Write YAML config
+        yaml_file = temp_dir / "config.yaml"
+        with open(yaml_file, "w") as f:
+            yaml.dump(sample_config_dict, f)
+
+        # Write JSON config
+        json_file = temp_dir / "config.json"
+        with open(json_file, "w") as f:
+            json.dump(sample_config_dict, f, indent=2)
+
+        # Load both configurations
+        yaml_manager = ConfigurationManager(temp_dir)
+        yaml_config = yaml_manager.load_configuration(yaml_file)
+
+        json_manager = ConfigurationManager(temp_dir)
+        json_config = json_manager.load_configuration(json_file)
+
+        # Should be equivalent
+        assert len(yaml_config.cloudflare_zones) == len(json_config.cloudflare_zones)
+        assert yaml_config.global_ttl == json_config.global_ttl
+
+        yaml_zone = yaml_config.cloudflare_zones[0]
+        json_zone = json_config.cloudflare_zones[0]
+
+        assert yaml_zone.zone_id == json_zone.zone_id
+        assert yaml_zone.ttl == json_zone.ttl
+        assert len(yaml_zone.subdomains) == len(json_zone.subdomains)
+
+    def test_end_to_end_configuration_flow(self, temp_dir):
+        """Test complete configuration workflow"""
+        # Create configuration using builder
+        original_config = (
+            ConfigurationBuilder()
+            .set_global_ttl(300)
+            .add_zone("zone123", api_token="token123", zone_ttl=600)
+            .add_subdomain("@", proxied=True)
+            .add_subdomain("www", proxied=True)
+            .add_subdomain("api", proxied=False, ttl=120)
+            .done()
+            .build()
+        )
+
+        # Convert to dict for saving
+        config_dict = {
+            "cloudflare": [
+                {
+                    "authentication": {"api_token": "token123"},
+                    "zone_id": "zone123",
+                    "ttl": 600,
+                    "subdomains": [
+                        {"name": "@", "proxied": True},
+                        {"name": "www", "proxied": True},
+                        {"name": "api", "proxied": False, "ttl": 120},
+                    ],
+                }
+            ],
+            "ttl": 300,
+        }
+
+        # Save as JSON
+        json_file = temp_dir / "config.json"
+        with open(json_file, "w") as f:
+            json.dump(config_dict, f, indent=2)
+
+        # Load using manager
+        manager = ConfigurationManager(temp_dir)
+        loaded_config = manager.load_configuration()
+
+        # Verify configuration
+        assert loaded_config.global_ttl == original_config.global_ttl
+        assert len(loaded_config.cloudflare_zones) == len(
+            original_config.cloudflare_zones
+        )
+
+        loaded_zone = loaded_config.cloudflare_zones[0]
+        original_zone = original_config.cloudflare_zones[0]
+
+        assert loaded_zone.zone_id == original_zone.zone_id
+        assert loaded_zone.ttl == original_zone.ttl
+        assert len(loaded_zone.subdomains) == len(original_zone.subdomains)
+
+        # Test TTL resolution
+        api_subdomain = next(s for s in loaded_zone.subdomains if s.name == "api")
+        effective_ttl = loaded_zone.get_effective_ttl(api_subdomain)
+        assert effective_ttl == 120  # Should use subdomain-specific TTL
