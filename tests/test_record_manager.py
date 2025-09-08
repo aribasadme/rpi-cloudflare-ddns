@@ -840,14 +840,15 @@ class TestErrorConditions:
             debug_call = mock_logger.debug.call_args[0][0]
             assert "Retrieved" in debug_call and "A records" in debug_call
 
-    # def test_missing_zone_name_error(self):
-    #     """Test error when zone name is missing"""
-    #     manager = RecordManager()
+    def test_missing_zone_name_error(self):
+        """Test error when zone name is missing"""
+        manager = RecordManager()
 
-    #     # Create config without zone_name
-    #     config = Mock()
-    #     config.zone_name = None
-    #     config.zone_id = TEST_ZONE_ID
+        # Create config without zone_name
+        config = Mock()
+        config.zone_name = None
+        config.zone_id = TEST_ZONE_ID
 
-    #     with pytest.raises(RecordManagerError) as exc_info:
-    #         manager.prepare_updates(config, [], "10.0.0.1")
+        with pytest.raises(RecordManagerError) as exc_info:
+            manager.prepare_updates(config, [], "10.0.0.1")
+            assert "zone_name" in str(exc_info.value).lower()
