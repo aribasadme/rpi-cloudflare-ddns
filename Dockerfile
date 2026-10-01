@@ -1,38 +1,39 @@
-# --------- Base stage ---------
-FROM python:3.12-slim AS base
+# Multi-stage build: resolve deps with uv, ship a final image without uv.
+
+# Builder: install locked deps into /app/.venv
+FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS builder
+ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=0
+
+WORKDIR /app
+RUN --mount=type=cache,target=/root/.cache/uv \
+    --mount=type=bind,source=uv.lock,target=uv.lock \
+    --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
+    uv sync --locked --no-install-project --no-dev
+COPY . /app
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --locked --no-dev
+
+
+# Final: must match the builder's Python version so the venv paths line up
+FROM python:3.12-slim-bookworm
+
+RUN groupadd --system app && \
+    useradd --system --gid app --no-create-home --shell /usr/sbin/nologin app
 
 WORKDIR /app
 
-RUN groupadd -r ddns && \
-    useradd -r -g ddns -s /bin/false ddns
+# Copy only the runtime artifacts (virtualenv + source)
+COPY --from=builder --chown=app:app /app/.venv /app/.venv
+COPY --from=builder --chown=app:app /app/src /app/src
 
-# --------- Dependencies stage ---------
-FROM python:3.12-slim AS dependencies
-
-WORKDIR /app
-
-COPY requirements.txt .
-
-RUN pip install --no-cache-dir -r requirements.txt
-
-# --------- Final stage ---------
-FROM base AS final
-
-WORKDIR /app
-
-COPY --from=dependencies /usr/local/lib/python3.12/site-packages/ /usr/local/lib/python3.12/site-packages/
-COPY src/ .
-
-RUN chown -R ddns:ddns /app
-
-USER ddns
-
-# Environment variables
+ENV PATH="/app/.venv/bin:$PATH"
 ENV PYTHONUNBUFFERED=1
 
-ENTRYPOINT ["python"]
+USER app
 
-CMD ["ddns_updater.py"]
+# Script is the entrypoint, so runtime flags (e.g. --validate) append cleanly
+ENTRYPOINT ["python", "src/ddns_updater.py"]
 
+ARG VERSION=2.3.0
 LABEL description="Cloudflare DDNS Updater" \
-      version="2.3.0"
+      version="${VERSION}"
