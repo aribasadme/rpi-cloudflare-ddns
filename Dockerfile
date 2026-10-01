@@ -32,7 +32,7 @@ ENV PYTHONUNBUFFERED=1
 
 ENTRYPOINT ["python"]
 
-CMD ["main.py"]
+CMD ["ddns_updater.py"]
 
 LABEL description="Cloudflare DDNS Updater" \
       version="2.3.0"
