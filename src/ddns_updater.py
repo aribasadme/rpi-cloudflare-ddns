@@ -6,7 +6,6 @@ import logging
 import os
 import time
 from dataclasses import dataclass
-from typing import List, Optional
 
 from cloudflare import Cloudflare
 
@@ -26,19 +25,13 @@ logger = logging.getLogger(__name__)
 class DNSUpdaterError(Exception):
     """Custom exception for DNS updater errors"""
 
-    pass
-
 
 class AuthenticationError(DNSUpdaterError):
     """Exception for authentication-related errors"""
 
-    pass
-
 
 class ZoneValidationError(DNSUpdaterError):
     """Exception for zone validation errors"""
-
-    pass
 
 
 @dataclass
@@ -51,7 +44,7 @@ class UpdateCycleResult:
     total_records_updated: int
     successful_updates: int
     failed_updates: int
-    zone_summaries: List[ZoneUpdateSummary]
+    zone_summaries: list[ZoneUpdateSummary]
     execution_time_seconds: float
 
     @property
@@ -176,9 +169,9 @@ class DNSUpdater:
         self,
         config_manager: ConfigurationManager,
         ip_provider: IPProvider,
-        record_manager: Optional[BatchRecordManager] = None,
-        authenticator: Optional[CloudflareAuthenticator] = None,
-        validator: Optional[ZoneValidator] = None,
+        record_manager: BatchRecordManager | None = None,
+        authenticator: CloudflareAuthenticator | None = None,
+        validator: ZoneValidator | None = None,
     ):
         """Initialize DNS updater
 
@@ -195,9 +188,9 @@ class DNSUpdater:
         self.authenticator = authenticator or CloudflareAuthenticator()
         self.validator = validator or ZoneValidator()
 
-        self._configuration: Optional[DDNSConfiguration] = None
-        self._validated_zones: List[CloudflareZoneConfig] = []
-        self._last_known_ip: Optional[str] = None
+        self._configuration: DDNSConfiguration | None = None
+        self._validated_zones: list[CloudflareZoneConfig] = []
+        self._last_known_ip: str | None = None
 
     def load_configuration(self) -> DDNSConfiguration:
         """Load and cache configuration
@@ -217,7 +210,7 @@ class DNSUpdater:
         except ConfigurationError as e:
             raise DNSUpdaterError(f"Configuration loading failed: {e}")
 
-    def validate_zones(self) -> List[CloudflareZoneConfig]:
+    def validate_zones(self) -> list[CloudflareZoneConfig]:
         """Validate all configured zones and set up clients
 
         Returns:
@@ -231,7 +224,7 @@ class DNSUpdater:
                 "Configuration not loaded. Call load_configuration() first."
             )
 
-        validated_zones: List[CloudflareZoneConfig] = []
+        validated_zones: list[CloudflareZoneConfig] = []
 
         for zone_config in self._configuration.cloudflare_zones:
             try:

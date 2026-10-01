@@ -9,7 +9,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
 from string import Template
-from typing import Any, Dict, List, Optional, Type
+from typing import Any
 
 import yaml
 from schema import And, Or, Schema, SchemaError, Use
@@ -21,8 +21,6 @@ logger = logging.getLogger(__name__)
 class ConfigurationError(Exception):
     """Custom exception for configuration-related errors"""
 
-    pass
-
 
 @dataclass
 class SubdomainConfig:
@@ -30,7 +28,7 @@ class SubdomainConfig:
 
     name: str
     proxied: bool = False
-    ttl: Optional[int] = None
+    ttl: int | None = None
 
     def __post_init__(self):
         """Validate subdomain configuration after initialization"""
@@ -45,9 +43,9 @@ class SubdomainConfig:
 class AuthenticationConfig:
     """Configuration for Cloudflare authentication"""
 
-    api_token: Optional[str] = None
-    api_key: Optional[str] = None
-    api_email: Optional[str] = None
+    api_token: str | None = None
+    api_key: str | None = None
+    api_email: str | None = None
 
     def __post_init__(self):
         """Validate authentication configuration"""
@@ -71,12 +69,12 @@ class CloudflareZoneConfig:
 
     authentication: AuthenticationConfig
     zone_id: str
-    subdomains: List[SubdomainConfig]
-    ttl: Optional[int] = None  # Zone-level default TTL
+    subdomains: list[SubdomainConfig]
+    ttl: int | None = None  # Zone-level default TTL
 
     # Runtime fields (populated during validation)
-    zone_name: Optional[str] = field(default=None, init=False)
-    client: Optional[Any] = field(default=None, init=False)
+    zone_name: str | None = field(default=None, init=False)
+    client: Any | None = field(default=None, init=False)
 
     def __post_init__(self):
         """Validate zone configuration"""
@@ -105,8 +103,8 @@ class CloudflareZoneConfig:
 class DDNSConfiguration:
     """Main DDNS configuration"""
 
-    cloudflare_zones: List[CloudflareZoneConfig]
-    global_ttl: Optional[int] = None
+    cloudflare_zones: list[CloudflareZoneConfig]
+    global_ttl: int | None = None
 
     def __post_init__(self):
         """Validate main configuration"""
@@ -125,25 +123,22 @@ class ConfigurationParser(ABC):
     """Abstract base class for configuration parsers"""
 
     @abstractmethod
-    def parse(self, content: str) -> Dict[str, Any]:
+    def parse(self, content: str) -> dict[str, Any]:
         """Parse configuration content and return dictionary"""
-        pass
 
     @abstractmethod
-    def get_file_extensions(self) -> List[str]:
+    def get_file_extensions(self) -> list[str]:
         """Return list of supported file extensions"""
-        pass
 
     @abstractmethod
     def get_format_name(self) -> str:
         """Return human-readable format name"""
-        pass
 
 
 class YAMLConfigurationParser(ConfigurationParser):
     """YAML configuration parser"""
 
-    def parse(self, content: str) -> Dict[str, Any]:
+    def parse(self, content: str) -> dict[str, Any]:
         """Parse YAML content"""
         try:
             config = yaml.safe_load(content)
@@ -153,7 +148,7 @@ class YAMLConfigurationParser(ConfigurationParser):
         except yaml.YAMLError as e:
             raise ConfigurationError(f"Invalid YAML: {e}")
 
-    def get_file_extensions(self) -> List[str]:
+    def get_file_extensions(self) -> list[str]:
         return ["yaml", "yml"]
 
     def get_format_name(self) -> str:
@@ -163,7 +158,7 @@ class YAMLConfigurationParser(ConfigurationParser):
 class JSONConfigurationParser(ConfigurationParser):
     """JSON configuration parser"""
 
-    def parse(self, content: str) -> Dict[str, Any]:
+    def parse(self, content: str) -> dict[str, Any]:
         """Parse JSON content"""
         try:
             config = json.loads(content)
@@ -173,7 +168,7 @@ class JSONConfigurationParser(ConfigurationParser):
         except json.JSONDecodeError as e:
             raise ConfigurationError(f"Invalid JSON: {e}")
 
-    def get_file_extensions(self) -> List[str]:
+    def get_file_extensions(self) -> list[str]:
         return ["json"]
 
     def get_format_name(self) -> str:
@@ -183,11 +178,11 @@ class JSONConfigurationParser(ConfigurationParser):
 class ConfigurationParserFactory:
     """Factory for creating configuration parsers"""
 
-    _parsers: Dict[str, Type[ConfigurationParser]] = {}
+    _parsers: dict[str, type[ConfigurationParser]] = {}
     _default_parsers_registered = False
 
     @classmethod
-    def register_parser(cls, parser_class: Type[ConfigurationParser]) -> None:
+    def register_parser(cls, parser_class: type[ConfigurationParser]) -> None:
         """Register a configuration parser"""
         parser_instance = parser_class()
         for ext in parser_instance.get_file_extensions():
@@ -219,7 +214,7 @@ class ConfigurationParserFactory:
         return parser_class()
 
     @classmethod
-    def get_supported_extensions(cls) -> List[str]:
+    def get_supported_extensions(cls) -> list[str]:
         """Get list of all supported file extensions"""
         cls._register_default_parsers()
         return list(cls._parsers.keys())
@@ -244,7 +239,7 @@ class ConfigurationManager:
                             SchemaOptional("proxied"): bool,
                             SchemaOptional("ttl"): And(
                                 Use(int),  # type: ignore
-                                lambda n: (n == 1 or (60 <= n <= 86400)),
+                                lambda n: n == 1 or (60 <= n <= 86400),
                             ),
                         }
                     ],
@@ -261,18 +256,18 @@ class ConfigurationManager:
         }
     )
 
-    def __init__(self, base_path: Optional[Path] = None):
+    def __init__(self, base_path: Path | None = None):
         """Initialize configuration manager
 
         Args:
             base_path: Base path to search for config files. Defaults to current working directory.
         """
         self.base_path = base_path or Path.cwd()
-        self._configuration: Optional[DDNSConfiguration] = None
+        self._configuration: DDNSConfiguration | None = None
         self._env_vars = self._load_environment_variables()
         self._parser_factory = ConfigurationParserFactory()
 
-    def _load_environment_variables(self) -> Dict[str, str]:
+    def _load_environment_variables(self) -> dict[str, str]:
         """Load environment variables starting with CF_DDNS_"""
         return {
             key: value
@@ -297,7 +292,7 @@ class ConfigurationManager:
             f"Tried: {', '.join(tried_files)}"
         )
 
-    def _load_and_parse_file(self, config_path: Path) -> Dict[str, Any]:
+    def _load_and_parse_file(self, config_path: Path) -> dict[str, Any]:
         """Load file and parse with appropriate parser"""
         try:
             # Read file content
@@ -325,14 +320,14 @@ class ConfigurationManager:
         except Exception as e:
             raise ConfigurationError(f"Error reading {config_path}: {e}")
 
-    def _validate_schema(self, raw_config: Dict[str, Any]) -> None:
-        """Validate raw config against schema"""
+    def _validate_schema(self, raw_config: dict[str, Any]) -> dict[str, Any]:
+        """Validate raw config against schema and return the coerced result"""
         try:
-            self.CONFIG_SCHEMA.validate(raw_config)
+            return self.CONFIG_SCHEMA.validate(raw_config)
         except SchemaError as e:
             raise ConfigurationError(f"Configuration validation failed: {e}")
 
-    def _convert_to_dataclasses(self, raw_config: Dict[str, Any]) -> DDNSConfiguration:
+    def _convert_to_dataclasses(self, raw_config: dict[str, Any]) -> DDNSConfiguration:
         """Convert raw config dict to typed dataclasses"""
         try:
             cloudflare_zones = []
@@ -373,9 +368,7 @@ class ConfigurationManager:
         except (KeyError, TypeError) as e:
             raise ConfigurationError(f"Error converting configuration: {e}")
 
-    def load_configuration(
-        self, config_path: Optional[Path] = None
-    ) -> DDNSConfiguration:
+    def load_configuration(self, config_path: Path | None = None) -> DDNSConfiguration:
         """Load configuration from file
 
         Args:
@@ -395,11 +388,11 @@ class ConfigurationManager:
             # Load and parse file
             raw_config = self._load_and_parse_file(config_path)
 
-            # Validate schema
-            self._validate_schema(raw_config)
+            # Validate schema and apply type coercion (e.g. TTL -> int)
+            validated_config = self._validate_schema(raw_config)
 
             # Convert to dataclasses
-            configuration = self._convert_to_dataclasses(raw_config)
+            configuration = self._convert_to_dataclasses(validated_config)
 
             # Cache the configuration
             self._configuration = configuration
@@ -434,7 +427,7 @@ class ConfigurationManager:
         self._configuration = None
         return self.load_configuration()
 
-    def get_supported_formats(self) -> Dict[str, str]:
+    def get_supported_formats(self) -> dict[str, str]:
         """Get supported configuration formats"""
         formats = {}
         for ext in self._parser_factory.get_supported_extensions():
@@ -450,16 +443,16 @@ class ConfigurationBuilder:
     """Builder pattern for creating configurations programmatically"""
 
     def __init__(self):
-        self._zones: List[CloudflareZoneConfig] = []
-        self._global_ttl: Optional[int] = None
+        self._zones: list[CloudflareZoneConfig] = []
+        self._global_ttl: int | None = None
 
     def add_zone(
         self,
         zone_id: str,
-        api_token: Optional[str] = None,
-        api_key: Optional[str] = None,
-        api_email: Optional[str] = None,
-        zone_ttl: Optional[int] = None,
+        api_token: str | None = None,
+        api_key: str | None = None,
+        api_email: str | None = None,
+        zone_ttl: int | None = None,
     ) -> "ZoneBuilder":
         """Add a zone and return a builder for that zone"""
 
@@ -490,16 +483,16 @@ class ZoneBuilder:
         parent: ConfigurationBuilder,
         zone_id: str,
         auth: AuthenticationConfig,
-        zone_ttl: Optional[int],
+        zone_ttl: int | None,
     ):
         self._parent = parent
         self._zone_id = zone_id
         self._auth = auth
         self._zone_ttl = zone_ttl
-        self._subdomains: List[SubdomainConfig] = []
+        self._subdomains: list[SubdomainConfig] = []
 
     def add_subdomain(
-        self, name: str, proxied: bool = False, ttl: Optional[int] = None
+        self, name: str, proxied: bool = False, ttl: int | None = None
     ) -> "ZoneBuilder":
         """Add a subdomain to this zone"""
         subdomain = SubdomainConfig(name=name, proxied=proxied, ttl=ttl)
@@ -520,13 +513,13 @@ class ZoneBuilder:
 
 # Factory functions for common use cases
 def create_configuration_manager(
-    base_path: Optional[Path] = None,
+    base_path: Path | None = None,
 ) -> ConfigurationManager:
     """Create a configuration manager with default settings"""
     return ConfigurationManager(base_path)
 
 
-def load_configuration_from_file(file_path: Optional[Path] = None) -> DDNSConfiguration:
+def load_configuration_from_file(file_path: Path | None = None) -> DDNSConfiguration:
     """Convenience function to load configuration from file"""
     manager = ConfigurationManager()
     return manager.load_configuration(file_path)

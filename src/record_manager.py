@@ -5,7 +5,7 @@ DNS Record Management Module - handles DNS record operations and updates
 import logging
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Dict, List, Optional, Protocol
+from typing import Protocol
 
 from cloudflare import Cloudflare
 from cloudflare.types.dns.record_response import A
@@ -29,7 +29,7 @@ class DnsUpdateRequest:
     zone_id: str
     fqdn: str
     record_id: str
-    record_type: Optional[Literal["A"]]
+    record_type: Literal["A"] | None
     proxied: bool
     current_content: str
     new_content: str
@@ -49,7 +49,7 @@ class UpdateResult:
     success: bool
     old_ip: str
     new_ip: str
-    error_message: Optional[str] = None
+    error_message: str | None = None
 
     def __str__(self) -> str:
         if self.success:
@@ -67,7 +67,7 @@ class ZoneUpdateSummary:
     total_records: int
     successful_updates: int
     failed_updates: int
-    results: List[UpdateResult]
+    results: list[UpdateResult]
 
     @property
     def success_rate(self) -> float:
@@ -86,7 +86,7 @@ class ZoneUpdateSummary:
 class CloudflareClientProtocol(Protocol):
     """Protocol for Cloudflare client interface"""
 
-    def list_records(self, zone_id: str) -> List[A]:
+    def list_records(self, zone_id: str) -> list[A]:
         """List DNS records for a zone"""
         ...
 
@@ -101,7 +101,7 @@ class CloudflareClientAdapter:
     def __init__(self, client: Cloudflare):
         self.client = client
 
-    def list_records(self, zone_id: str) -> List[A]:
+    def list_records(self, zone_id: str) -> list[A]:
         """List A records for the specified zone"""
         try:
             records = self.client.dns.records.list(zone_id=zone_id)
@@ -127,7 +127,7 @@ class CloudflareClientAdapter:
 class RecordManager:
     """Manages DNS record operations for Cloudflare zones"""
 
-    def __init__(self, client: Optional[CloudflareClientProtocol] = None):
+    def __init__(self, client: CloudflareClientProtocol | None = None):
         """Initialize the record manager
 
         Args:
@@ -135,7 +135,7 @@ class RecordManager:
         """
         self.client = client
 
-    def fetch_zone_records(self, zone_config: CloudflareZoneConfig) -> List[A]:
+    def fetch_zone_records(self, zone_config: CloudflareZoneConfig) -> list[A]:
         """Fetch all A records for a zone
 
         Args:
@@ -174,8 +174,8 @@ class RecordManager:
         return f"{name}.{base_domain}"
 
     def prepare_updates(
-        self, zone_config: CloudflareZoneConfig, records: List[A], new_ip: str
-    ) -> List[DnsUpdateRequest]:
+        self, zone_config: CloudflareZoneConfig, records: list[A], new_ip: str
+    ) -> list[DnsUpdateRequest]:
         """Identify DNS records that need IP address updates
 
         Args:
@@ -191,11 +191,11 @@ class RecordManager:
                 f"Zone name not populated for zone {zone_config.zone_id}"
             )
 
-        updates: List[DnsUpdateRequest] = []
+        updates: list[DnsUpdateRequest] = []
         base_domain = str(zone_config.zone_name)
 
         # Create lookup map for existing A records
-        record_map: Dict[str, A] = {}
+        record_map: dict[str, A] = {}
         for record in records:
             if record.name is not None:
                 record_map[record.name.lower()] = record
@@ -230,7 +230,7 @@ class RecordManager:
         return updates
 
     def execute_updates(
-        self, zone_config: CloudflareZoneConfig, updates: List[DnsUpdateRequest]
+        self, zone_config: CloudflareZoneConfig, updates: list[DnsUpdateRequest]
     ) -> ZoneUpdateSummary:
         """Execute DNS record updates for a zone
 
@@ -247,7 +247,7 @@ class RecordManager:
             )
 
         client = CloudflareClientAdapter(zone_config.client)
-        results: List[UpdateResult] = []
+        results: list[UpdateResult] = []
 
         for update in updates:
             try:
@@ -361,7 +361,7 @@ class RecordManager:
 class BatchRecordManager:
     """Manages DNS record operations across multiple zones"""
 
-    def __init__(self, record_manager: Optional[RecordManager] = None):
+    def __init__(self, record_manager: RecordManager | None = None):
         """Initialize the batch record manager
 
         Args:
@@ -370,8 +370,8 @@ class BatchRecordManager:
         self.record_manager = record_manager or RecordManager()
 
     def update_all_zones(
-        self, zone_configs: List[CloudflareZoneConfig], new_ip: str
-    ) -> List[ZoneUpdateSummary]:
+        self, zone_configs: list[CloudflareZoneConfig], new_ip: str
+    ) -> list[ZoneUpdateSummary]:
         """Update DNS records across multiple zones
 
         Args:
@@ -381,7 +381,7 @@ class BatchRecordManager:
         Returns:
             List of update summaries for each zone
         """
-        summaries: List[ZoneUpdateSummary] = []
+        summaries: list[ZoneUpdateSummary] = []
 
         for zone_config in zone_configs:
             try:
@@ -413,7 +413,7 @@ class BatchRecordManager:
 
         return summaries
 
-    def get_overall_summary(self, summaries: List[ZoneUpdateSummary]) -> Dict[str, int]:
+    def get_overall_summary(self, summaries: list[ZoneUpdateSummary]) -> dict[str, int]:
         """Get overall summary statistics
 
         Args:
