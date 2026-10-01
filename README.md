@@ -19,13 +19,13 @@ If you need to update other record types (like CNAME, MX, etc.) or require addit
 
 ## Features
 
-- Retrieves the external IP address of the machine using the `ipify.org` API.
+- Retrieves the external IP address with automatic fallback across multiple providers (`api.ipify.org`, `checkip.amazonaws.com`, `icanhazip.com`).
 - Automatic IP address monitoring and DNS record updates
 - Support for multiple Cloudflare zones and domains
 
 ## Prerequisites
 
-- Python 3.7 or higher
+- Python 3.12 or higher
 - Docker installed on your system
 - Cloudflare API Token with DNS edit permissions
 - Your domain(s) managed by Cloudflare
@@ -101,6 +101,7 @@ CHECK_INTERVAL=900
 cloudflare:
   - authentication:
       api_token: "${CF_DDNS_API_TOKEN}"
+    zone_id: "${CF_DDNS_ZONE_ID}"
 ```
 
 ### Using Docker Compose (Recommended)
@@ -174,7 +175,8 @@ Common issues and solutions:
    - Verify your zone ID is correct
 2. **Container stops unexpectedly**
    - Check container logs for error messages
-   - Verify your configuration file is valid JSON
+   - Verify your configuration file is valid YAML (or JSON)
+   - Run `python src/ddns_updater.py --validate` to check the configuration without starting the updater
    - Ensure the container has internet access
 
 ## Contributing
@@ -188,4 +190,4 @@ This project is licensed under the [MIT License](LICENSE).
 ## Acknowledgments
 
 - The Cloudflare Python API library: https://github.com/cloudflare/python-cloudflare
-- The `ipify.org` API for retrieving the external IP address
+- The `ipify.org`, `checkip.amazonaws.com`, and `icanhazip.com` services for retrieving the external IP address
