@@ -32,11 +32,10 @@ class SubdomainConfig:
 
     def __post_init__(self):
         """Validate subdomain configuration after initialization"""
-        if self.ttl is not None:
-            if not (self.ttl == 1 or (60 <= self.ttl <= 86400)):
-                raise ConfigurationError(
-                    f"Invalid TTL {self.ttl} for subdomain '{self.name}'. Must be 1 or between 60-86400"
-                )
+        if self.ttl is not None and not (self.ttl == 1 or (60 <= self.ttl <= 86400)):
+            raise ConfigurationError(
+                f"Invalid TTL {self.ttl} for subdomain '{self.name}'. Must be 1 or between 60-86400"
+            )
 
 
 @dataclass
@@ -84,11 +83,10 @@ class CloudflareZoneConfig:
         if not self.subdomains:
             raise ConfigurationError("At least one subdomain must be configured")
 
-        if self.ttl is not None:
-            if not (self.ttl == 1 or (60 <= self.ttl <= 86400)):
-                raise ConfigurationError(
-                    f"Invalid zone TTL {self.ttl}. Must be 1 or between 60-86400"
-                )
+        if self.ttl is not None and not (self.ttl == 1 or (60 <= self.ttl <= 86400)):
+            raise ConfigurationError(
+                f"Invalid zone TTL {self.ttl}. Must be 1 or between 60-86400"
+            )
 
     def get_effective_ttl(self, subdomain: SubdomainConfig) -> int:
         """Get the effective TTL for a subdomain (subdomain > zone > default)"""
@@ -111,11 +109,12 @@ class DDNSConfiguration:
         if not self.cloudflare_zones:
             raise ConfigurationError("At least one Cloudflare zone must be configured")
 
-        if self.global_ttl is not None:
-            if not (self.global_ttl == 1 or (60 <= self.global_ttl <= 86400)):
-                raise ConfigurationError(
-                    f"Invalid global TTL {self.global_ttl}. Must be 1 or between 60-86400"
-                )
+        if self.global_ttl is not None and not (
+            self.global_ttl == 1 or (60 <= self.global_ttl <= 86400)
+        ):
+            raise ConfigurationError(
+                f"Invalid global TTL {self.global_ttl}. Must be 1 or between 60-86400"
+            )
 
 
 # Abstract base class for configuration parsers
