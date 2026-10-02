@@ -1,8 +1,11 @@
 # Multi-stage build: resolve deps with uv, ship a final image without uv.
 
-# Builder: install locked deps into /app/.venv
-FROM ghcr.io/astral-sh/uv:python3.12-trixie-slim AS builder
-ENV UV_COMPILE_BYTECODE=1 
+# Builder: install locked deps into /app/.venv.
+# Install uv via pip on the python base (rather than the astral uv image) so the
+# builder works on every arch python supports, including linux/arm/v7 (32-bit Pi).
+FROM python:3.12-slim-trixie AS builder
+RUN pip install --no-cache-dir uv
+ENV UV_COMPILE_BYTECODE=1
 ENV UV_LINK_MODE=copy
 ENV UV_NO_DEV=1
 ENV UV_PYTHON_DOWNLOADS=0
@@ -14,7 +17,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-install-project --no-dev
 COPY . /app
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --locked --no-dev
+    uv sync --locked
 
 
 # Final: must match the builder's Python version so the venv paths line up
