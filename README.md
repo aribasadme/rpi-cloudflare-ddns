@@ -33,7 +33,13 @@ If you need to update other record types (like CNAME, MX, etc.) or require addit
 
 ## Configuration
 
-Create either `config.yaml` or `config.yml` file with your Cloudflare configuration:
+Copy the provided `config-example.yaml` to `config.yaml` (or `config.yml`) and edit it with your Cloudflare configuration:
+
+```bash
+cp config-example.yaml config.yaml
+```
+
+The resulting file looks like:
 
 ```yml
 cloudflare:

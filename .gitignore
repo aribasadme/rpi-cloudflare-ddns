@@ -10,7 +10,8 @@ venv/
 
 # Project specific
 .env
-config-true.yaml
+config.yaml
+config.yml
 
 # Misc
 .DS_Store

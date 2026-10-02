@@ -9,6 +9,7 @@
 
 ### 🔧 Changed
 - IP address validation now uses the standard library `ipaddress` module and is address-family aware.
+- Renamed the tracked `config.yaml` to `config-example.yaml`; copy it to `config.yaml` and edit it with your own values. `config.yaml`/`config.yml` are now git-ignored to avoid committing secrets.
 
 ### 🛠️ Notes
 - Records are still update-only — the `AAAA` record must already exist in Cloudflare.
