@@ -10,10 +10,11 @@ A Python-based Dynamic DNS updater for Cloudflare that automatically updates DNS
 This script is configured to update 'A' (IPv4) and 'AAAA' (IPv6) DNS records across multiple Cloudflare zones. While the application is designed to handle multiple domains and zones efficiently, please note:
 
 1. The script supports IPv4 (A records) and IPv6 (AAAA records) updates; IPv6 is opt-in per subdomain via the `type` field
-2. All DNS records must be pre-existing in Cloudflare (the script doesn't create new records)
-3. The script assumes all configured domains are managed under the same Cloudflare account
-4. API rate limits apply based on your Cloudflare plan
-5. While the script is designed to be efficient, large numbers of DNS records may impact performance
+2. **For IPv6, the updater must run on the exact machine you want the AAAA record to point to.** IPv6 is not NAT-ed: each host has its own public address, so the detected IPv6 is the address of the machine making the request. (IPv4 is different — behind NAT every device on the LAN shares the router's public address, so the detected IPv4 is the same regardless of which host runs the updater.)
+3. All DNS records must be pre-existing in Cloudflare (the script doesn't create new records)
+4. The script assumes all configured domains are managed under the same Cloudflare account
+5. API rate limits apply based on your Cloudflare plan
+6. While the script is designed to be efficient, large numbers of DNS records may impact performance
 
 If you need to update other record types (like CNAME, MX, etc.) or require additional functionality, you will need to modify the script accordingly.
 
