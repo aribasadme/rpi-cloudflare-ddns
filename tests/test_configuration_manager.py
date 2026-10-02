@@ -139,6 +139,32 @@ class TestSubdomainConfig:
         assert config.name == "api"
         assert config.proxied is False
         assert config.ttl is None
+        assert config.record_types == ["A"]  # defaults to IPv4 only
+
+    def test_record_types_mixed(self):
+        """Both A and AAAA can be requested"""
+        config = SubdomainConfig(name="www", record_types=["A", "AAAA"])
+        assert config.record_types == ["A", "AAAA"]
+
+    def test_record_types_normalized_to_uppercase(self):
+        """Lowercase record types are normalized"""
+        config = SubdomainConfig(name="www", record_types=["a", "aaaa"])
+        assert config.record_types == ["A", "AAAA"]
+
+    def test_record_types_invalid_rejected(self):
+        """Unsupported record types raise"""
+        with pytest.raises(ConfigurationError, match="Invalid record type"):
+            SubdomainConfig(name="www", record_types=["A", "CNAME"])
+
+    def test_record_types_empty_rejected(self):
+        """At least one record type is required"""
+        with pytest.raises(ConfigurationError, match="at least one record type"):
+            SubdomainConfig(name="www", record_types=[])
+
+    def test_record_types_duplicate_rejected(self):
+        """Duplicate record types raise"""
+        with pytest.raises(ConfigurationError, match="Duplicate record types"):
+            SubdomainConfig(name="www", record_types=["A", "A"])
 
     def test_invalid_ttl_too_low(self):
         """Test TTL validation - too low"""
@@ -519,6 +545,48 @@ class TestConfigurationManager:
         assert isinstance(config, DDNSConfiguration)
         assert len(config.cloudflare_zones) == 1
         assert config.global_ttl == 600
+
+    def test_load_configuration_with_record_types(self, temp_dir):
+        """Test loading configuration with per-subdomain record types"""
+        config_content = """
+cloudflare:
+  - authentication:
+      api_token: "token123"
+    zone_id: "zone123"
+    subdomains:
+      - name: "@"
+        proxied: false
+        type: ["A", "AAAA"]
+      - name: "www"
+        proxied: false
+"""
+        config_file = temp_dir / "config.yaml"
+        config_file.write_text(config_content)
+
+        manager = ConfigurationManager(temp_dir)
+        config = manager.load_configuration()
+
+        subdomains = config.cloudflare_zones[0].subdomains
+        assert subdomains[0].record_types == ["A", "AAAA"]
+        assert subdomains[1].record_types == ["A"]  # defaulted
+
+    def test_load_configuration_invalid_record_type(self, temp_dir):
+        """Test schema rejects an unsupported record type"""
+        config_content = """
+cloudflare:
+  - authentication:
+      api_token: "token123"
+    zone_id: "zone123"
+    subdomains:
+      - name: "@"
+        type: ["A", "MX"]
+"""
+        config_file = temp_dir / "config.yaml"
+        config_file.write_text(config_content)
+
+        manager = ConfigurationManager(temp_dir)
+        with pytest.raises(ConfigurationError, match="Configuration validation failed"):
+            manager.load_configuration()
 
     def test_load_configuration_with_env_vars(self, temp_dir):
         """Test loading configuration with environment variable substitution"""

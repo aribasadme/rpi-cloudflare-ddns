@@ -31,10 +31,10 @@ def mock_config_manager():
 
 
 @pytest.fixture
-def mock_ip_provider():
+def mock_ip_providers():
     provider = Mock()
     provider.get_public_ip.return_value = "1.2.3.4"
-    return provider
+    return {"A": provider}
 
 
 @pytest.fixture
@@ -67,39 +67,41 @@ def mock_validated_zone():
     zone.zone_id = TEST_ZONE_ID
     zone.zone_name = TEST_ZONE_NAME
     zone.authentication = Mock()
-    zone.subdomains = []
+    subdomain = Mock()
+    subdomain.record_types = ["A"]
+    zone.subdomains = [subdomain]
     zone.ttl = 300
     zone.client = Mock()
     return zone
 
 
-def test_load_configuration_success(mock_config_manager, mock_ip_provider):
+def test_load_configuration_success(mock_config_manager, mock_ip_providers):
     updater = DNSUpdater(
         config_manager=mock_config_manager,
-        ip_provider=mock_ip_provider,
+        ip_providers=mock_ip_providers,
     )
     config = updater.load_configuration()
     assert config is not None
     mock_config_manager.load_configuration.assert_called_once()
 
 
-def test_load_configuration_failure(mock_ip_provider):
+def test_load_configuration_failure(mock_ip_providers):
     config_manager = Mock()
     config_manager.load_configuration.side_effect = ConfigurationError("Config error")
     updater = DNSUpdater(
         config_manager=config_manager,
-        ip_provider=mock_ip_provider,
+        ip_providers=mock_ip_providers,
     )
     with pytest.raises(DNSUpdaterError):
         updater.load_configuration()
 
 
 def test_validate_zones_success(
-    mock_config_manager, mock_ip_provider, mock_validated_zone
+    mock_config_manager, mock_ip_providers, mock_validated_zone
 ):
     updater = DNSUpdater(
         config_manager=mock_config_manager,
-        ip_provider=mock_ip_provider,
+        ip_providers=mock_ip_providers,
     )
     updater._configuration = Mock(cloudflare_zones=[mock_validated_zone])
     with (
@@ -116,10 +118,10 @@ def test_validate_zones_success(
         mock_validate_zone.assert_called_once()
 
 
-def test_validate_zones_failure(mock_config_manager, mock_ip_provider):
+def test_validate_zones_failure(mock_config_manager, mock_ip_providers):
     updater = DNSUpdater(
         config_manager=mock_config_manager,
-        ip_provider=mock_ip_provider,
+        ip_providers=mock_ip_providers,
     )
     updater._configuration = Mock(
         cloudflare_zones=[
@@ -137,67 +139,112 @@ def test_validate_zones_failure(mock_config_manager, mock_ip_provider):
         updater.validate_zones()
 
 
-def test_get_current_ip_success(mock_config_manager, mock_ip_provider):
-    updater = DNSUpdater(
-        config_manager=mock_config_manager,
-        ip_provider=mock_ip_provider,
-    )
-    ip = updater.get_current_ip()
-    assert ip == "1.2.3.4"
-    mock_ip_provider.get_public_ip.assert_called_once()
-
-
-def test_get_current_ip_failure(mock_config_manager):
-    ip_provider = Mock()
-    ip_provider.get_public_ip.side_effect = IPProviderError("IP error")
-    updater = DNSUpdater(
-        config_manager=mock_config_manager,
-        ip_provider=ip_provider,
-    )
-    with pytest.raises(DNSUpdaterError):
-        updater.get_current_ip()
-
-
-def test_update_dns_records_success(
-    mock_config_manager, mock_ip_provider, mock_record_manager, mock_validated_zone
+def test_get_current_ips_success(
+    mock_config_manager, mock_ip_providers, mock_validated_zone
 ):
     updater = DNSUpdater(
         config_manager=mock_config_manager,
-        ip_provider=mock_ip_provider,
+        ip_providers=mock_ip_providers,
+    )
+    updater._validated_zones = [mock_validated_zone]
+    ips = updater.get_current_ips()
+    assert ips == {"A": "1.2.3.4"}
+    mock_ip_providers["A"].get_public_ip.assert_called_once()
+
+
+def test_get_current_ips_ipv4_failure_raises(mock_config_manager, mock_validated_zone):
+    provider = Mock()
+    provider.get_public_ip.side_effect = IPProviderError("IP error")
+    updater = DNSUpdater(
+        config_manager=mock_config_manager,
+        ip_providers={"A": provider},
+    )
+    updater._validated_zones = [mock_validated_zone]
+    with pytest.raises(DNSUpdaterError):
+        updater.get_current_ips()
+
+
+def test_get_current_ips_ipv6_failure_skips(mock_config_manager):
+    v4 = Mock()
+    v4.get_public_ip.return_value = "1.2.3.4"
+    v6 = Mock()
+    v6.get_public_ip.side_effect = IPProviderError("no IPv6")
+
+    zone = Mock()
+    subdomain = Mock()
+    subdomain.record_types = ["A", "AAAA"]
+    zone.subdomains = [subdomain]
+
+    updater = DNSUpdater(
+        config_manager=mock_config_manager,
+        ip_providers={"A": v4, "AAAA": v6},
+    )
+    updater._validated_zones = [zone]
+    ips = updater.get_current_ips()
+    assert ips == {"A": "1.2.3.4"}  # AAAA skipped gracefully
+
+
+def test_get_current_ips_only_fetches_needed_families(mock_config_manager):
+    v4 = Mock()
+    v4.get_public_ip.return_value = "1.2.3.4"
+    v6 = Mock()
+    v6.get_public_ip.return_value = "2001:db8::1"
+
+    zone = Mock()
+    subdomain = Mock()
+    subdomain.record_types = ["A"]  # no subdomain requests AAAA
+    zone.subdomains = [subdomain]
+
+    updater = DNSUpdater(
+        config_manager=mock_config_manager,
+        ip_providers={"A": v4, "AAAA": v6},
+    )
+    updater._validated_zones = [zone]
+    ips = updater.get_current_ips()
+    assert ips == {"A": "1.2.3.4"}
+    v6.get_public_ip.assert_not_called()
+
+
+def test_update_dns_records_success(
+    mock_config_manager, mock_ip_providers, mock_record_manager, mock_validated_zone
+):
+    updater = DNSUpdater(
+        config_manager=mock_config_manager,
+        ip_providers=mock_ip_providers,
         record_manager=mock_record_manager,
     )
     updater._validated_zones = [mock_validated_zone]
-    updater._last_known_ip = "0.0.0.0"
-    result = updater.update_dns_records("1.2.3.4")
+    updater._last_known_ips = {"A": "0.0.0.0"}
+    result = updater.update_dns_records({"A": "1.2.3.4"})
     assert isinstance(result, UpdateCycleResult)
     assert result.successful_updates == 2
     assert result.failed_updates == 0
 
 
 def test_update_dns_records_failure(
-    mock_config_manager, mock_ip_provider, mock_record_manager
+    mock_config_manager, mock_ip_providers, mock_record_manager
 ):
     updater = DNSUpdater(
         config_manager=mock_config_manager,
-        ip_provider=mock_ip_provider,
+        ip_providers=mock_ip_providers,
         record_manager=mock_record_manager,
     )
     updater._validated_zones = [Mock()]
     mock_record_manager.update_all_zones.side_effect = Exception("Update error")
     with pytest.raises(DNSUpdaterError):
-        updater.update_dns_records("1.2.3.4")
+        updater.update_dns_records({"A": "1.2.3.4"})
 
 
 def test_check_and_update_ip_changed(
-    mock_config_manager, mock_ip_provider, mock_record_manager, mock_validated_zone
+    mock_config_manager, mock_ip_providers, mock_record_manager, mock_validated_zone
 ):
     updater = DNSUpdater(
         config_manager=mock_config_manager,
-        ip_provider=mock_ip_provider,
+        ip_providers=mock_ip_providers,
         record_manager=mock_record_manager,
     )
     updater._validated_zones = [mock_validated_zone]
-    updater._last_known_ip = "0.0.0.0"
+    updater._last_known_ips = {"A": "0.0.0.0"}
     with patch.object(
         updater,
         "update_dns_records",
@@ -205,30 +252,30 @@ def test_check_and_update_ip_changed(
     ) as mock_update:
         result = updater.check_and_update()
         assert result.ip_changed
-        mock_update.assert_called_once_with("1.2.3.4")
+        mock_update.assert_called_once_with({"A": "1.2.3.4"})
 
 
 def test_check_and_update_no_ip_change(
-    mock_config_manager, mock_ip_provider, mock_record_manager, mock_validated_zone
+    mock_config_manager, mock_ip_providers, mock_record_manager, mock_validated_zone
 ):
     updater = DNSUpdater(
         config_manager=mock_config_manager,
-        ip_provider=mock_ip_provider,
+        ip_providers=mock_ip_providers,
         record_manager=mock_record_manager,
     )
     updater._validated_zones = [mock_validated_zone]
-    updater._last_known_ip = "1.2.3.4"
+    updater._last_known_ips = {"A": "1.2.3.4"}
     result = updater.check_and_update()
     assert not result.ip_changed
     assert result.total_records_updated == 0
 
 
 def test_run_continuous_keyboard_interrupt(
-    mock_config_manager, mock_ip_provider, mock_record_manager, mock_validated_zone
+    mock_config_manager, mock_ip_providers, mock_record_manager, mock_validated_zone
 ):
     updater = DNSUpdater(
         config_manager=mock_config_manager,
-        ip_provider=mock_ip_provider,
+        ip_providers=mock_ip_providers,
         record_manager=mock_record_manager,
     )
     updater._validated_zones = [mock_validated_zone]
@@ -238,11 +285,11 @@ def test_run_continuous_keyboard_interrupt(
 
 
 def test_run_continuous_dns_updater_error(
-    mock_config_manager, mock_ip_provider, mock_record_manager, mock_validated_zone
+    mock_config_manager, mock_ip_providers, mock_record_manager, mock_validated_zone
 ):
     updater = DNSUpdater(
         config_manager=mock_config_manager,
-        ip_provider=mock_ip_provider,
+        ip_providers=mock_ip_providers,
         record_manager=mock_record_manager,
     )
     updater._validated_zones = [mock_validated_zone]
@@ -259,11 +306,11 @@ def test_run_continuous_dns_updater_error(
 
 
 def test_run_continuous_unexpected_error(
-    mock_config_manager, mock_ip_provider, mock_record_manager, mock_validated_zone
+    mock_config_manager, mock_ip_providers, mock_record_manager, mock_validated_zone
 ):
     updater = DNSUpdater(
         config_manager=mock_config_manager,
-        ip_provider=mock_ip_provider,
+        ip_providers=mock_ip_providers,
         record_manager=mock_record_manager,
     )
     updater._validated_zones = [mock_validated_zone]
@@ -279,10 +326,10 @@ def test_run_continuous_unexpected_error(
         updater.run_continuous(check_interval=1)
 
 
-def test_run_continuous_not_initialized(mock_config_manager, mock_ip_provider):
+def test_run_continuous_not_initialized(mock_config_manager, mock_ip_providers):
     updater = DNSUpdater(
         config_manager=mock_config_manager,
-        ip_provider=mock_ip_provider,
+        ip_providers=mock_ip_providers,
     )
     with pytest.raises(DNSUpdaterError):
         updater.run_continuous(check_interval=1)
@@ -291,14 +338,14 @@ def test_run_continuous_not_initialized(mock_config_manager, mock_ip_provider):
 @pytest.mark.parametrize("failed_updates", [0, 1])
 def test_run_continuous_ip_changed_branches(
     mock_config_manager,
-    mock_ip_provider,
+    mock_ip_providers,
     mock_record_manager,
     mock_validated_zone,
     failed_updates,
 ):
     updater = DNSUpdater(
         config_manager=mock_config_manager,
-        ip_provider=mock_ip_provider,
+        ip_providers=mock_ip_providers,
         record_manager=mock_record_manager,
     )
     updater._validated_zones = [mock_validated_zone]
@@ -317,7 +364,7 @@ def test_run_continuous_ip_changed_branches(
 
 def test_update_cycle_result_success_rate_no_records():
     result = UpdateCycleResult(
-        ip_address="1.2.3.4",
+        ip_addresses={"A": "1.2.3.4"},
         ip_changed=False,
         zones_processed=0,
         total_records_updated=0,
@@ -332,7 +379,7 @@ def test_update_cycle_result_success_rate_no_records():
 
 def test_update_cycle_result_str_ip_changed():
     result = UpdateCycleResult(
-        ip_address="1.2.3.4",
+        ip_addresses={"A": "1.2.3.4", "AAAA": "2001:db8::1"},
         ip_changed=True,
         zones_processed=1,
         total_records_updated=4,
@@ -342,7 +389,8 @@ def test_update_cycle_result_str_ip_changed():
         execution_time_seconds=1.5,
     )
     assert result.success_rate == 75.0
-    assert "IP changed to 1.2.3.4" in str(result)
+    assert "A=1.2.3.4" in str(result)
+    assert "AAAA=2001:db8::1" in str(result)
 
 
 # CloudflareAuthenticator.create_client
@@ -432,19 +480,19 @@ def test_validate_zone_failure():
 # validate_zones edge cases
 
 
-def test_validate_zones_not_loaded(mock_config_manager, mock_ip_provider):
+def test_validate_zones_not_loaded(mock_config_manager, mock_ip_providers):
     updater = DNSUpdater(
         config_manager=mock_config_manager,
-        ip_provider=mock_ip_provider,
+        ip_providers=mock_ip_providers,
     )
     with pytest.raises(DNSUpdaterError):
         updater.validate_zones()
 
 
-def test_validate_zones_unexpected_error(mock_config_manager, mock_ip_provider):
+def test_validate_zones_unexpected_error(mock_config_manager, mock_ip_providers):
     updater = DNSUpdater(
         config_manager=mock_config_manager,
-        ip_provider=mock_ip_provider,
+        ip_providers=mock_ip_providers,
     )
     updater._configuration = Mock(
         cloudflare_zones=[Mock(zone_id="bad", authentication=Mock())]
@@ -461,10 +509,10 @@ def test_validate_zones_unexpected_error(mock_config_manager, mock_ip_provider):
 # initialize
 
 
-def test_initialize_success(mock_config_manager, mock_ip_provider):
+def test_initialize_success(mock_config_manager, mock_ip_providers):
     updater = DNSUpdater(
         config_manager=mock_config_manager,
-        ip_provider=mock_ip_provider,
+        ip_providers=mock_ip_providers,
     )
     with (
         patch.object(updater, "load_configuration"),
@@ -473,10 +521,10 @@ def test_initialize_success(mock_config_manager, mock_ip_provider):
         updater.initialize()
 
 
-def test_initialize_reraises_dns_updater_error(mock_config_manager, mock_ip_provider):
+def test_initialize_reraises_dns_updater_error(mock_config_manager, mock_ip_providers):
     updater = DNSUpdater(
         config_manager=mock_config_manager,
-        ip_provider=mock_ip_provider,
+        ip_providers=mock_ip_providers,
     )
     with (
         patch.object(
@@ -487,10 +535,10 @@ def test_initialize_reraises_dns_updater_error(mock_config_manager, mock_ip_prov
         updater.initialize()
 
 
-def test_initialize_wraps_unexpected_error(mock_config_manager, mock_ip_provider):
+def test_initialize_wraps_unexpected_error(mock_config_manager, mock_ip_providers):
     updater = DNSUpdater(
         config_manager=mock_config_manager,
-        ip_provider=mock_ip_provider,
+        ip_providers=mock_ip_providers,
     )
     with (
         patch.object(updater, "load_configuration", side_effect=RuntimeError("boom")),
@@ -502,17 +550,17 @@ def test_initialize_wraps_unexpected_error(mock_config_manager, mock_ip_provider
 # update_dns_records edge cases
 
 
-def test_update_dns_records_no_zones(mock_config_manager, mock_ip_provider):
+def test_update_dns_records_no_zones(mock_config_manager, mock_ip_providers):
     updater = DNSUpdater(
         config_manager=mock_config_manager,
-        ip_provider=mock_ip_provider,
+        ip_providers=mock_ip_providers,
     )
     with pytest.raises(DNSUpdaterError):
         updater.update_dns_records("1.2.3.4")
 
 
 def test_update_dns_records_with_failures(
-    mock_config_manager, mock_ip_provider, mock_record_manager, mock_validated_zone
+    mock_config_manager, mock_ip_providers, mock_record_manager, mock_validated_zone
 ):
     mock_record_manager.get_overall_summary.return_value = {
         "total_zones": 1,
@@ -523,12 +571,12 @@ def test_update_dns_records_with_failures(
     }
     updater = DNSUpdater(
         config_manager=mock_config_manager,
-        ip_provider=mock_ip_provider,
+        ip_providers=mock_ip_providers,
         record_manager=mock_record_manager,
     )
     updater._validated_zones = [mock_validated_zone]
-    updater._last_known_ip = "0.0.0.0"
-    result = updater.update_dns_records("1.2.3.4")
+    updater._last_known_ips = {"A": "0.0.0.0"}
+    result = updater.update_dns_records({"A": "1.2.3.4"})
     assert result.failed_updates == 1
 
 
@@ -536,26 +584,30 @@ def test_update_dns_records_with_failures(
 
 
 def test_check_and_update_reraises_dns_updater_error(
-    mock_config_manager, mock_ip_provider
+    mock_config_manager, mock_ip_providers
 ):
     updater = DNSUpdater(
         config_manager=mock_config_manager,
-        ip_provider=mock_ip_provider,
+        ip_providers=mock_ip_providers,
     )
     with (
-        patch.object(updater, "get_current_ip", side_effect=DNSUpdaterError("ip fail")),
+        patch.object(
+            updater, "get_current_ips", side_effect=DNSUpdaterError("ip fail")
+        ),
         pytest.raises(DNSUpdaterError),
     ):
         updater.check_and_update()
 
 
-def test_check_and_update_wraps_unexpected_error(mock_config_manager, mock_ip_provider):
+def test_check_and_update_wraps_unexpected_error(
+    mock_config_manager, mock_ip_providers
+):
     updater = DNSUpdater(
         config_manager=mock_config_manager,
-        ip_provider=mock_ip_provider,
+        ip_providers=mock_ip_providers,
     )
     with (
-        patch.object(updater, "get_current_ip", side_effect=RuntimeError("boom")),
+        patch.object(updater, "get_current_ips", side_effect=RuntimeError("boom")),
         pytest.raises(DNSUpdaterError),
     ):
         updater.check_and_update()

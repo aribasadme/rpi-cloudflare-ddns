@@ -2,12 +2,26 @@
 IP Provider module - handles fetching public IP addresses
 """
 
+import ipaddress
 import logging
+import os
 import urllib.request
 from abc import ABC, abstractmethod
 from urllib.error import URLError
 
 logger = logging.getLogger(__name__)
+
+# Endpoints per address family. Kept in separate lists so a fallback chain
+# never mixes IPv4 and IPv6 sources.
+_IPV4_ENDPOINTS = [
+    "https://api.ipify.org",
+    "https://checkip.amazonaws.com",
+    "https://icanhazip.com",
+]
+_IPV6_ENDPOINTS = [
+    "https://api6.ipify.org",
+    "https://ipv6.icanhazip.com",
+]
 
 
 class IPProviderError(Exception):
@@ -25,9 +39,14 @@ class IPProvider(ABC):
 class HttpIPProvider(IPProvider):
     """HTTP-based IP provider using external services"""
 
-    def __init__(self, url: str = "https://api.ipify.org", timeout: int = 5):
+    def __init__(
+        self, url: str = "https://api.ipify.org", timeout: int = 5, family: int = 4
+    ):
+        if family not in (4, 6):
+            raise ValueError(f"family must be 4 or 6, got {family}")
         self.url = url
         self.timeout = timeout
+        self.family = family
 
     def get_public_ip(self) -> str:
         """Gets machine's public IP address from HTTP service.
@@ -56,12 +75,9 @@ class HttpIPProvider(IPProvider):
             raise IPProviderError(f"Unexpected error fetching IP: {e}")
 
     def _is_valid_ip(self, ip: str) -> bool:
-        """Basic IPv4 validation"""
-        parts = ip.split(".")
-        if len(parts) != 4:
-            return False
+        """Validate that the address parses and matches the expected family"""
         try:
-            return all(0 <= int(part) <= 255 for part in parts)
+            return ipaddress.ip_address(ip).version == self.family
         except ValueError:
             return False
 
@@ -131,19 +147,29 @@ class FallbackIPProvider(IPProvider):
 
 # Factory function for easy setup
 def create_ip_provider(
-    with_cache: bool = True, with_fallback: bool = True, cache_duration: int = 300
+    with_cache: bool = True,
+    with_fallback: bool = True,
+    cache_duration: int = 300,
+    family: str = "ipv4",
 ) -> IPProvider:
-    """Create a production-ready IP provider with common configurations"""
+    """Create a production-ready IP provider with common configurations
 
-    # Primary and fallback providers
+    Args:
+        family: "ipv4" (A records) or "ipv6" (AAAA records)
+    """
+    if family == "ipv6":
+        endpoints, ip_family = _IPV6_ENDPOINTS, 6
+    elif family == "ipv4":
+        endpoints, ip_family = _IPV4_ENDPOINTS, 4
+    else:
+        raise ValueError(f"family must be 'ipv4' or 'ipv6', got {family!r}")
+
     providers: list[IPProvider] = [
-        HttpIPProvider("https://api.ipify.org", timeout=5),
-        HttpIPProvider("https://checkip.amazonaws.com", timeout=5),
-        HttpIPProvider("https://icanhazip.com", timeout=5),
+        HttpIPProvider(url, timeout=5, family=ip_family) for url in endpoints
     ]
 
     if with_fallback:
-        provider = FallbackIPProvider(providers)
+        provider: IPProvider = FallbackIPProvider(providers)
     else:
         provider = providers[0]  # Just use the primary
 
@@ -154,9 +180,12 @@ def create_ip_provider(
 
 
 # Add IP provider configuration via environment variables
-def create_configured_ip_provider():
-    """Create IP provider based on environment configuration"""
-    import os
+def create_configured_ip_provider() -> dict[str, IPProvider]:
+    """Create IP providers per record type based on environment configuration
+
+    Returns:
+        Mapping of record type ("A"/"AAAA") to its IP provider.
+    """
 
     cache_duration = int(os.environ.get("IP_CACHE_DURATION", "300"))
     enable_fallback = os.environ.get("IP_ENABLE_FALLBACK", "true").lower() == "true"
@@ -166,11 +195,20 @@ def create_configured_ip_provider():
         f"IP Provider config - Cache: {enable_cache} ({cache_duration}s), "
         f"Fallback: {enable_fallback}"
     )
-    return create_ip_provider(
-        with_cache=enable_cache,
-        with_fallback=enable_fallback,
-        cache_duration=cache_duration,
-    )
+    return {
+        "A": create_ip_provider(
+            with_cache=enable_cache,
+            with_fallback=enable_fallback,
+            cache_duration=cache_duration,
+            family="ipv4",
+        ),
+        "AAAA": create_ip_provider(
+            with_cache=enable_cache,
+            with_fallback=enable_fallback,
+            cache_duration=cache_duration,
+            family="ipv6",
+        ),
+    }
 
 
 # Example usage and migration guide:

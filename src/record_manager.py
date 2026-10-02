@@ -5,11 +5,10 @@ DNS Record Management Module - handles DNS record operations and updates
 import logging
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Protocol
+from typing import Literal, Protocol
 
 from cloudflare import Cloudflare
-from cloudflare.types.dns.record_response import A
-from typing_extensions import Literal
+from cloudflare.types.dns.record_response import AAAA, A
 
 from configuration_manager import CloudflareZoneConfig
 
@@ -19,8 +18,6 @@ logger = logging.getLogger(__name__)
 class RecordManagerError(Exception):
     """Custom exception for record management errors"""
 
-    pass
-
 
 @dataclass
 class DnsUpdateRequest:
@@ -29,7 +26,7 @@ class DnsUpdateRequest:
     zone_id: str
     fqdn: str
     record_id: str
-    record_type: Literal["A"] | None
+    record_type: Literal["A", "AAAA"] | None
     proxied: bool
     current_content: str
     new_content: str
@@ -86,7 +83,7 @@ class ZoneUpdateSummary:
 class CloudflareClientProtocol(Protocol):
     """Protocol for Cloudflare client interface"""
 
-    def list_records(self, zone_id: str) -> list[A]:
+    def list_records(self, zone_id: str) -> list[A | AAAA]:
         """List DNS records for a zone"""
         ...
 
@@ -101,13 +98,15 @@ class CloudflareClientAdapter:
     def __init__(self, client: Cloudflare):
         self.client = client
 
-    def list_records(self, zone_id: str) -> list[A]:
-        """List A records for the specified zone"""
+    def list_records(self, zone_id: str) -> list[A | AAAA]:
+        """List A and AAAA records for the specified zone"""
         try:
             records = self.client.dns.records.list(zone_id=zone_id)
-            a_records = [record for record in records if isinstance(record, A)]
-            logger.debug(f"Retrieved {len(a_records)} A records for zone {zone_id}")
-            return a_records
+            ip_records = [record for record in records if isinstance(record, (A, AAAA))]
+            logger.debug(
+                f"Retrieved {len(ip_records)} A/AAAA records for zone {zone_id}"
+            )
+            return ip_records
         except Exception as e:
             logger.error(f"Error fetching records for zone {zone_id}: {e}")
             raise RecordManagerError(f"Failed to fetch records for zone {zone_id}: {e}")
@@ -135,14 +134,14 @@ class RecordManager:
         """
         self.client = client
 
-    def fetch_zone_records(self, zone_config: CloudflareZoneConfig) -> list[A]:
-        """Fetch all A records for a zone
+    def fetch_zone_records(self, zone_config: CloudflareZoneConfig) -> list[A | AAAA]:
+        """Fetch all A and AAAA records for a zone
 
         Args:
             zone_config: Zone configuration with client attached
 
         Returns:
-            List of A records
+            List of A and AAAA records
 
         Raises:
             RecordManagerError: If records cannot be fetched
@@ -174,14 +173,18 @@ class RecordManager:
         return f"{name}.{base_domain}"
 
     def prepare_updates(
-        self, zone_config: CloudflareZoneConfig, records: list[A], new_ip: str
+        self,
+        zone_config: CloudflareZoneConfig,
+        records: list[A | AAAA],
+        new_ips: dict[str, str],
     ) -> list[DnsUpdateRequest]:
         """Identify DNS records that need IP address updates
 
         Args:
             zone_config: Zone configuration
             records: Current DNS records
-            new_ip: New IP address to set
+            new_ips: Mapping of record type ("A"/"AAAA") to the new address.
+                A type absent from this mapping (e.g. IPv6 unavailable) is skipped.
 
         Returns:
             List of update requests for records that need updating
@@ -194,18 +197,28 @@ class RecordManager:
         updates: list[DnsUpdateRequest] = []
         base_domain = str(zone_config.zone_name)
 
-        # Create lookup map for existing A records
-        record_map: dict[str, A] = {}
+        # Lookup map keyed by (fqdn, record type) so an A and AAAA record sharing
+        # the same name are matched independently.
+        record_map: dict[tuple[str, str], A | AAAA] = {}
         for record in records:
-            if record.name is not None:
-                record_map[record.name.lower()] = record
+            if record.name is not None and record.type is not None:
+                record_map[(record.name.lower(), record.type)] = record
 
-        # Check each configured subdomain
+        # Check each configured subdomain for every record type it opts into
         for subdomain_config in zone_config.subdomains:
             fqdn = self.build_fqdn(subdomain_config.name, base_domain)
 
-            # Check if record exists
-            if record := record_map.get(fqdn):
+            for record_type in subdomain_config.record_types:
+                new_ip = new_ips.get(record_type)
+                if new_ip is None:
+                    logger.debug(f"No {record_type} address available; skipping {fqdn}")
+                    continue
+
+                record = record_map.get((fqdn, record_type))
+                if record is None:
+                    logger.warning(f"DNS record not found: {fqdn} ({record_type})")
+                    continue
+
                 if record.content != new_ip:
                     effective_ttl = zone_config.get_effective_ttl(subdomain_config)
 
@@ -223,9 +236,9 @@ class RecordManager:
                     updates.append(update_request)
                     logger.debug(f"Queued update: {update_request}")
                 else:
-                    logger.debug(f"Record {fqdn} already has correct IP: {new_ip}")
-            else:
-                logger.warning(f"DNS record not found: {fqdn}")
+                    logger.debug(
+                        f"Record {fqdn} ({record_type}) already has correct IP: {new_ip}"
+                    )
 
         return updates
 
@@ -315,13 +328,13 @@ class RecordManager:
         return summary
 
     def update_zone_records(
-        self, zone_config: CloudflareZoneConfig, new_ip: str
+        self, zone_config: CloudflareZoneConfig, new_ips: dict[str, str]
     ) -> ZoneUpdateSummary:
         """Complete workflow: fetch records, prepare updates, and execute them
 
         Args:
             zone_config: Zone configuration with client attached
-            new_ip: New IP address to set
+            new_ips: Mapping of record type ("A"/"AAAA") to the new address
 
         Returns:
             Summary of update results
@@ -331,7 +344,7 @@ class RecordManager:
             records = self.fetch_zone_records(zone_config)
 
             # Prepare updates
-            updates = self.prepare_updates(zone_config, records, new_ip)
+            updates = self.prepare_updates(zone_config, records, new_ips)
 
             if not updates:
                 logger.debug(f"No records need updating for {zone_config.zone_name}")
@@ -370,13 +383,13 @@ class BatchRecordManager:
         self.record_manager = record_manager or RecordManager()
 
     def update_all_zones(
-        self, zone_configs: list[CloudflareZoneConfig], new_ip: str
+        self, zone_configs: list[CloudflareZoneConfig], new_ips: dict[str, str]
     ) -> list[ZoneUpdateSummary]:
         """Update DNS records across multiple zones
 
         Args:
             zone_configs: List of zone configurations with clients attached
-            new_ip: New IP address to set
+            new_ips: Mapping of record type ("A"/"AAAA") to the new address
 
         Returns:
             List of update summaries for each zone
@@ -386,7 +399,7 @@ class BatchRecordManager:
         for zone_config in zone_configs:
             try:
                 logger.debug(f"Processing zone: {zone_config.zone_name}")
-                summary = self.record_manager.update_zone_records(zone_config, new_ip)
+                summary = self.record_manager.update_zone_records(zone_config, new_ips)
                 summaries.append(summary)
 
                 if summary.total_records > 0:

@@ -38,7 +38,7 @@ class ZoneValidationError(DNSUpdaterError):
 class UpdateCycleResult:
     """Result of a complete update cycle"""
 
-    ip_address: str
+    ip_addresses: dict[str, str]
     ip_changed: bool
     zones_processed: int
     total_records_updated: int
@@ -54,16 +54,20 @@ class UpdateCycleResult:
             return 100.0
         return (self.successful_updates / self.total_records_updated) * 100
 
+    def _format_ips(self) -> str:
+        """Render the per-family addresses, e.g. 'A=1.2.3.4, AAAA=2001:db8::1'"""
+        return ", ".join(f"{rtype}={ip}" for rtype, ip in self.ip_addresses.items())
+
     def __str__(self) -> str:
         if self.ip_changed:
             return (
-                f"IP changed to {self.ip_address}: "
+                f"IP changed to {self._format_ips()}: "
                 f"{self.successful_updates}/{self.total_records_updated} "
                 f"updates successful ({self.success_rate:.1f}%) in "
                 f"{self.execution_time_seconds:.2f}s"
             )
         else:
-            return f"No IP change detected: {self.ip_address}"
+            return f"No IP change detected: {self._format_ips()}"
 
 
 class CloudflareAuthenticator:
@@ -168,7 +172,7 @@ class DNSUpdater:
     def __init__(
         self,
         config_manager: ConfigurationManager,
-        ip_provider: IPProvider,
+        ip_providers: dict[str, IPProvider],
         record_manager: BatchRecordManager | None = None,
         authenticator: CloudflareAuthenticator | None = None,
         validator: ZoneValidator | None = None,
@@ -177,20 +181,20 @@ class DNSUpdater:
 
         Args:
             config_manager: Configuration manager
-            ip_provider: IP provider
+            ip_providers: Mapping of record type ("A"/"AAAA") to its IP provider
             record_manager: Record manager (creates new if None)
             authenticator: Cloudflare authenticator (creates new if None)
             validator: Zone validator (creates new if None)
         """
         self.config_manager = config_manager
-        self.ip_provider = ip_provider
+        self.ip_providers = ip_providers
         self.record_manager = record_manager or BatchRecordManager()
         self.authenticator = authenticator or CloudflareAuthenticator()
         self.validator = validator or ZoneValidator()
 
         self._configuration: DDNSConfiguration | None = None
         self._validated_zones: list[CloudflareZoneConfig] = []
-        self._last_known_ip: str | None = None
+        self._last_known_ips: dict[str, str] = {}
 
     def load_configuration(self) -> DDNSConfiguration:
         """Load and cache configuration
@@ -272,25 +276,48 @@ class DNSUpdater:
         except Exception as e:
             raise DNSUpdaterError(f"DNS updater initialization failed: {e}")
 
-    def get_current_ip(self) -> str:
-        """Get current public IP address
+    def _needed_record_types(self) -> set[str]:
+        """Record types requested by any subdomain across validated zones"""
+        needed: set[str] = set()
+        for zone in self._validated_zones:
+            for subdomain in zone.subdomains:
+                needed.update(subdomain.record_types)
+        return needed
+
+    def get_current_ips(self) -> dict[str, str]:
+        """Get current public IP address for each needed record type
+
+        Only families requested by at least one subdomain are fetched. IPv4 (A)
+        failures raise; IPv6 (AAAA) failures are logged and skipped so IPv4-only
+        hosts keep working.
 
         Returns:
-            Current public IP address
+            Mapping of record type to its current public IP address
 
         Raises:
-            DNSUpdaterError: If IP cannot be obtained
+            DNSUpdaterError: If a required IPv4 address cannot be obtained
         """
-        try:
-            return self.ip_provider.get_public_ip()
-        except IPProviderError as e:
-            raise DNSUpdaterError(f"Failed to obtain public IP: {e}")
+        ips: dict[str, str] = {}
+        for record_type in self._needed_record_types():
+            provider = self.ip_providers.get(record_type)
+            if provider is None:
+                logger.warning(f"No IP provider configured for {record_type}")
+                continue
+            try:
+                ips[record_type] = provider.get_public_ip()
+            except IPProviderError as e:
+                if record_type == "A":
+                    raise DNSUpdaterError(f"Failed to obtain public IP: {e}")
+                logger.warning(
+                    f"Could not obtain {record_type} address, skipping it: {e}"
+                )
+        return ips
 
-    def update_dns_records(self, new_ip: str) -> UpdateCycleResult:
-        """Update DNS records with new IP address
+    def update_dns_records(self, new_ips: dict[str, str]) -> UpdateCycleResult:
+        """Update DNS records with new IP addresses
 
         Args:
-            new_ip: New IP address to set
+            new_ips: Mapping of record type ("A"/"AAAA") to the new address
 
         Returns:
             Update cycle result
@@ -308,7 +335,7 @@ class DNSUpdater:
         try:
             # Update all zones
             zone_summaries = self.record_manager.update_all_zones(
-                self._validated_zones, new_ip
+                self._validated_zones, new_ips
             )
 
             # Calculate overall statistics
@@ -317,8 +344,8 @@ class DNSUpdater:
             execution_time = time.time() - start_time
 
             result = UpdateCycleResult(
-                ip_address=new_ip,
-                ip_changed=new_ip != self._last_known_ip,
+                ip_addresses=new_ips,
+                ip_changed=new_ips != self._last_known_ips,
                 zones_processed=overall_stats["total_zones"],
                 total_records_updated=overall_stats["total_records"],
                 successful_updates=overall_stats["successful_updates"],
@@ -327,7 +354,7 @@ class DNSUpdater:
                 execution_time_seconds=execution_time,
             )
 
-            self._last_known_ip = new_ip
+            self._last_known_ips = new_ips
 
             if result.failed_updates > 0:
                 logger.warning(
@@ -351,21 +378,21 @@ class DNSUpdater:
             DNSUpdaterError: If the check and update process fails
         """
         try:
-            # Get current IP
-            current_ip = self.get_current_ip()
+            # Get current IPs
+            current_ips = self.get_current_ips()
 
-            # Check if IP changed
-            if current_ip != self._last_known_ip:
+            # Check if any IP changed
+            if current_ips != self._last_known_ips:
                 logger.info(
-                    f"Public IP changed from {self._last_known_ip} to {current_ip}"
+                    f"Public IP changed from {self._last_known_ips} to {current_ips}"
                 )
-                return self.update_dns_records(current_ip)
+                return self.update_dns_records(current_ips)
             else:
-                logger.debug(f"No IP change detected. Current IP: {current_ip}")
+                logger.debug(f"No IP change detected. Current IPs: {current_ips}")
 
                 # Return a "no change" result
                 return UpdateCycleResult(
-                    ip_address=current_ip,
+                    ip_addresses=current_ips,
                     ip_changed=False,
                     zones_processed=0,
                     total_records_updated=0,
@@ -458,10 +485,10 @@ def main():
 
         config_manager = create_configuration_manager()
 
-        # Create IP provider
+        # Create IP providers (per record type)
         from ip_provider import create_configured_ip_provider
 
-        ip_provider = create_configured_ip_provider()
+        ip_providers = create_configured_ip_provider()
 
         # Create batch record manager
         from record_manager import create_batch_record_manager
@@ -471,7 +498,7 @@ def main():
         # Create updater
         updater = DNSUpdater(
             config_manager=config_manager,
-            ip_provider=ip_provider,
+            ip_providers=ip_providers,
             record_manager=batch_manager,
         )
 
