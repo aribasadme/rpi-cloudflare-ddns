@@ -4,6 +4,7 @@ IP Provider module - handles fetching public IP addresses
 
 import ipaddress
 import logging
+import os
 import urllib.request
 from abc import ABC, abstractmethod
 from urllib.error import URLError
@@ -185,7 +186,6 @@ def create_configured_ip_provider() -> dict[str, IPProvider]:
     Returns:
         Mapping of record type ("A"/"AAAA") to its IP provider.
     """
-    import os
 
     cache_duration = int(os.environ.get("IP_CACHE_DURATION", "300"))
     enable_fallback = os.environ.get("IP_ENABLE_FALLBACK", "true").lower() == "true"
