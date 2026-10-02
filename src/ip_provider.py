@@ -5,7 +5,6 @@ IP Provider module - handles fetching public IP addresses
 import logging
 import urllib.request
 from abc import ABC, abstractmethod
-from typing import Optional
 from urllib.error import URLError
 
 logger = logging.getLogger(__name__)
@@ -14,8 +13,6 @@ logger = logging.getLogger(__name__)
 class IPProviderError(Exception):
     """Custom exception for IP provider related errors"""
 
-    pass
-
 
 class IPProvider(ABC):
     """Abstract base class for IP providers"""
@@ -23,7 +20,6 @@ class IPProvider(ABC):
     @abstractmethod
     def get_public_ip(self) -> str:
         """Get public IP address. Raises IPProviderError on failure."""
-        pass
 
 
 class HttpIPProvider(IPProvider):
@@ -76,8 +72,8 @@ class CachedIPProvider(IPProvider):
     def __init__(self, provider: IPProvider, cache_duration: int = 300):
         self.provider = provider
         self.cache_duration = cache_duration
-        self._cached_ip: Optional[str] = None
-        self._cache_time: Optional[float] = None
+        self._cached_ip: str | None = None
+        self._cache_time: float | None = None
 
     def get_public_ip(self) -> str:
         """Get IP with caching support"""

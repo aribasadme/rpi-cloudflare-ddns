@@ -1,30 +1,32 @@
-# Version control
+# Documentation/Markdown
+docs/
+**/*.md
+LICENSE
+
+# Docker
+.dockerignore
+*.Dockerfile
+Dockerfile
+
+# Git
 .git/
 .gitignore
+.pre-commit-config.yaml
 
 # Python
 __pycache__/
-venv/
+.pytest_cache/
 .venv/
+
+# Tests & Local development
+.coverage
+.env
+local/
+tests/
 
 # IDEs and editors
 .vscode/
 
-# Docker
-Dockerfile
-.docker
-.dockerignore
-
-# Project specific
-.env
-
-# Documentation
-docs/
-*.md
-LICENSE
-
-# CI/CD
-.github/
-
 # Misc
 .DS_Store
+.envrc

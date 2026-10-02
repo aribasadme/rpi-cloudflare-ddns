@@ -1,6 +1,6 @@
 # Raspberry Pi Cloudflare DDNS Updater
 
-[![Tests](https://github.com/aribasadme/rpi-cloudflare-ddns/actions/workflows/test.yml/badge.svg)](https://github.com/aribasadme/rpi-cloudflare-ddns/actions/workflows/test.yml)
+[![Tests](https://github.com/aribasadme/rpi-cloudflare-ddns/actions/workflows/tests.yml/badge.svg)](https://github.com/aribasadme/rpi-cloudflare-ddns/actions/workflows/tests.yml)
 [![codecov](https://codecov.io/gh/aribasadme/rpi-cloudflare-ddns/branch/main/graph/badge.svg)](https://codecov.io/gh/aribasadme/rpi-cloudflare-ddns)
 
 A Python-based Dynamic DNS updater for Cloudflare that automatically updates DNS records when your public IP address changes. Designed to be lightweight and containerized.
@@ -17,16 +17,15 @@ This script is configured to update 'A' DNS records across multiple Cloudflare z
 
 If you need to update other record types (like CNAME, MX, etc.) or require additional functionality, you will need to modify the script accordingly.
 
-
 ## Features
 
-- Retrieves the external IP address of the machine using the `ipify.org` API.
+- Retrieves the external IP address with automatic fallback across multiple providers (`api.ipify.org`, `checkip.amazonaws.com`, `icanhazip.com`).
 - Automatic IP address monitoring and DNS record updates
 - Support for multiple Cloudflare zones and domains
 
 ## Prerequisites
 
-- Python 3.7 or higher
+- Python 3.12 or higher
 - Docker installed on your system
 - Cloudflare API Token with DNS edit permissions
 - Your domain(s) managed by Cloudflare
@@ -52,14 +51,15 @@ ttl: 300
 
 - `ttl`: Global time-to-live for DNS records in seconds (defaults to 300). Set to 1 for Auto TTL.
 - `cloudflare`: Array of zone configurations
-    - `authentication.api_token`: Your Cloudflare API token
-    - `zone_id`: Your Cloudflare zone ID
-    - `subdomains`: Array of subdomain configurations
-        - `name`: Subdomain name (use "@" or empty "" for root domain)
-        - `proxied`: Whether to proxy through Cloudflare (true/false)
-        - `ttl`: (Optional) Time-to-live in seconds for this specific subdomain. Set to 1 for Auto TTL. If not set, uses the global TTL value.
+  - `authentication.api_token`: Your Cloudflare API token
+  - `zone_id`: Your Cloudflare zone ID
+  - `subdomains`: Array of subdomain configurations
+    - `name`: Subdomain name (use "@" or empty "" for root domain)
+    - `proxied`: Whether to proxy through Cloudflare (true/false)
+    - `ttl`: (Optional) Time-to-live in seconds for this specific subdomain. Set to 1 for Auto TTL. If not set, uses the global TTL value.
 
 Example configuration with per-subdomain TTL:
+
 ```yml
 cloudflare:
   - authentication:
@@ -68,24 +68,27 @@ cloudflare:
     subdomains:
       - name: "@"
         proxied: false
-        ttl: 1  # Auto TTL for root domain
+        ttl: 1 # Auto TTL for root domain
       - name: "foo"
         proxied: false
-        ttl: 120  # 2 minutes TTL for foo subdomain
+        ttl: 120 # 2 minutes TTL for foo subdomain
       - name: "bar"
-        proxied: false  # Will use global TTL
-ttl: 300  # Global TTL, used when not specified in subdomain
+        proxied: false # Will use global TTL
+ttl: 300 # Global TTL, used when not specified in subdomain
 ```
 
 ## Docker Deployment
 
 ### Environment Variables
+
 - You can define environmental variables that starts with `CF_DDNS_` and use it in config.yaml (Example: `CF_DDNS_API_TOKEN`).
+
 ```bash
 export CF_DDNS_API_TOKEN=your_cloudflare_api_token
 ```
 
 - You can also use a `.env` file to manage them:
+
 ```text
 CF_DDNS_API_TOKEN=your_cloudflare_api_token
 CF_DDNS_ZONE_ID=your_cloudflare_zone_id
@@ -93,10 +96,12 @@ CHECK_INTERVAL=900
 ```
 
 - Then edit you `config.yaml` accordingly:
+
 ```yml
 cloudflare:
   - authentication:
       api_token: "${CF_DDNS_API_TOKEN}"
+    zone_id: "${CF_DDNS_ZONE_ID}"
 ```
 
 ### Using Docker Compose (Recommended)
@@ -165,13 +170,14 @@ docker logs -f cloudflare-ddns
 Common issues and solutions:
 
 1. **DNS records not updating**
-    - Verify your API token has the correct permissions
-    - Check the container logs for error messages
-    - Verify your zone ID is correct
+   - Verify your API token has the correct permissions
+   - Check the container logs for error messages
+   - Verify your zone ID is correct
 2. **Container stops unexpectedly**
-    - Check container logs for error messages
-    - Verify your configuration file is valid JSON
-    - Ensure the container has internet access
+   - Check container logs for error messages
+   - Verify your configuration file is valid YAML (or JSON)
+   - Run `python src/ddns_updater.py --validate` to check the configuration without starting the updater
+   - Ensure the container has internet access
 
 ## Contributing
 
@@ -184,5 +190,4 @@ This project is licensed under the [MIT License](LICENSE).
 ## Acknowledgments
 
 - The Cloudflare Python API library: https://github.com/cloudflare/python-cloudflare
-- The `ipify.org` API for retrieving the external IP address
-
+- The `ipify.org`, `checkip.amazonaws.com`, and `icanhazip.com` services for retrieving the external IP address
