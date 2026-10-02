@@ -22,6 +22,9 @@ class ConfigurationError(Exception):
     """Custom exception for configuration-related errors"""
 
 
+SUPPORTED_RECORD_TYPES = ("A", "AAAA")
+
+
 @dataclass
 class SubdomainConfig:
     """Configuration for a single subdomain"""
@@ -29,12 +32,30 @@ class SubdomainConfig:
     name: str
     proxied: bool = False
     ttl: int | None = None
+    record_types: list[str] = field(default_factory=lambda: ["A"])
 
     def __post_init__(self):
         """Validate subdomain configuration after initialization"""
         if self.ttl is not None and not (self.ttl == 1 or (60 <= self.ttl <= 86400)):
             raise ConfigurationError(
                 f"Invalid TTL {self.ttl} for subdomain '{self.name}'. Must be 1 or between 60-86400"
+            )
+
+        # Normalize and validate record types
+        self.record_types = [t.upper() for t in self.record_types]
+        if not self.record_types:
+            raise ConfigurationError(
+                f"Subdomain '{self.name}' must have at least one record type"
+            )
+        if len(self.record_types) != len(set(self.record_types)):
+            raise ConfigurationError(
+                f"Duplicate record types for subdomain '{self.name}': {self.record_types}"
+            )
+        invalid = [t for t in self.record_types if t not in SUPPORTED_RECORD_TYPES]
+        if invalid:
+            raise ConfigurationError(
+                f"Invalid record type(s) {invalid} for subdomain '{self.name}'. "
+                f"Supported: {', '.join(SUPPORTED_RECORD_TYPES)}"
             )
 
 
@@ -240,6 +261,13 @@ class ConfigurationManager:
                                 Use(int),  # type: ignore
                                 lambda n: n == 1 or (60 <= n <= 86400),
                             ),
+                            SchemaOptional("type"): And(
+                                [str],  # type: ignore
+                                lambda lst: (
+                                    len(lst) > 0
+                                    and all(t.upper() in ("A", "AAAA") for t in lst)
+                                ),
+                            ),
                         }
                     ],
                     SchemaOptional("ttl"): And(
@@ -347,6 +375,7 @@ class ConfigurationManager:
                         name=sub_data["name"],
                         proxied=sub_data.get("proxied", False),
                         ttl=sub_data.get("ttl"),
+                        record_types=[t.upper() for t in sub_data.get("type", ["A"])],
                     )
                     subdomains.append(subdomain)
 
@@ -540,7 +569,7 @@ def create_sample_configuration(format_type: str = "yaml") -> str:
                     {"name": "@", "proxied": True},
                     {"name": "www", "proxied": True},
                     {"name": "api", "proxied": False, "ttl": 120},
-                    {"name": "home", "proxied": False, "ttl": 1},
+                    {"name": "home", "proxied": False, "ttl": 1, "type": ["A", "AAAA"]},
                 ],
             }
         ],
@@ -580,6 +609,9 @@ cloudflare:
     - name: "home"       # Home subdomain
         proxied: false
         ttl: 1           # Auto TTL (follows Cloudflare settings)
+        # Optional: record types to keep in sync (defaults to ["A"]).
+        # Include "AAAA" to also update the IPv6 record for this name.
+        type: ["A", "AAAA"]
 
 # Optional: Global TTL (used when not specified at zone/subdomain level)
 ttl: 300
@@ -632,8 +664,9 @@ def validate_configuration_command() -> int:
                     ttl_source = " (default TTL)"
 
                 proxy_info = " 🛡️ Proxied" if sub.proxied else " 🌐 DNS-only"
+                types_info = f" [{', '.join(sub.record_types)}]"
                 print(
-                    f"       - 📝 {sub.name} → TTL: {effective_ttl}s{ttl_source}{proxy_info}"
+                    f"       - 📝 {sub.name} → TTL: {effective_ttl}s{ttl_source}{proxy_info}{types_info}"
                 )
 
         if config.global_ttl:

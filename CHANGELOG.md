@@ -1,5 +1,19 @@
 # Changelog
 
+## [v2.4.0] - 2026-10-02
+
+### ✨ Added
+- IPv6 support: `AAAA` records can now be kept in sync with the host's public IPv6 address.
+- New per-subdomain `type` config field to opt into record types (e.g. `type: ["A", "AAAA"]`). Defaults to `["A"]` when omitted, so existing configurations are unaffected.
+- IPv6 public-IP detection with fallback across `api6.ipify.org` and `ipv6.icanhazip.com`.
+
+### 🔧 Changed
+- IP address validation now uses the standard library `ipaddress` module and is address-family aware.
+
+### 🛠️ Notes
+- Records are still update-only — the `AAAA` record must already exist in Cloudflare.
+- On hosts without working IPv6 connectivity, IPv6 updates are skipped with a warning while IPv4 updates continue normally.
+
 ## [v2.0.0] - 2025-04-05
 
 ### ✨ Added

@@ -113,9 +113,35 @@ class TestHttpIPProvider:
         ],
     )
     def test_is_valid_ip(self, ip, expected):
-        """Test IP validation logic"""
+        """Test IPv4 validation logic"""
         provider = HttpIPProvider()
         assert provider._is_valid_ip(ip) == expected
+
+    @pytest.mark.parametrize(
+        "ip,expected",
+        [
+            ("2001:db8::1", True),
+            ("::1", True),
+            ("fe80::1ff:fe23:4567:890a", True),
+            ("2001:db8:zzzz::1", False),
+            ("1.2.3.4", False),  # IPv4 rejected by an IPv6 provider
+            ("", False),
+        ],
+    )
+    def test_is_valid_ipv6(self, ip, expected):
+        """Test IPv6 validation logic (family=6)"""
+        provider = HttpIPProvider("https://api6.ipify.org", family=6)
+        assert provider._is_valid_ip(ip) == expected
+
+    def test_ipv4_provider_rejects_ipv6_answer(self):
+        """An IPv4 provider must reject an IPv6 response"""
+        provider = HttpIPProvider(family=4)
+        assert provider._is_valid_ip("2001:db8::1") is False
+
+    def test_invalid_family_rejected(self):
+        """Constructing with an unsupported family raises"""
+        with pytest.raises(ValueError):
+            HttpIPProvider(family=5)
 
 
 class TestCachedIPProvider:
@@ -336,8 +362,12 @@ class TestConfigurableIPProvider:
         """Test configuration via environment variables"""
         from ip_provider import create_configured_ip_provider
 
-        provider = create_configured_ip_provider()
+        providers = create_configured_ip_provider()
 
+        # Returns a provider per record type
+        assert set(providers) == {"A", "AAAA"}
+
+        provider = providers["A"]
         # Should be cached but not fallback
         assert isinstance(provider, CachedIPProvider)
         assert provider.cache_duration == 600
@@ -350,8 +380,15 @@ class TestConfigurableIPProvider:
         """Test disabling cache but enabling fallback"""
         from ip_provider import create_configured_ip_provider
 
-        provider = create_configured_ip_provider()
+        providers = create_configured_ip_provider()
 
-        # Should be fallback but not cached
-        assert isinstance(provider, FallbackIPProvider)
-        assert len(provider.providers) == 3
+        # IPv4 fallback chain has 3 endpoints
+        v4 = providers["A"]
+        assert isinstance(v4, FallbackIPProvider)
+        assert len(v4.providers) == 3
+
+        # IPv6 fallback chain has 2 endpoints
+        v6 = providers["AAAA"]
+        assert isinstance(v6, FallbackIPProvider)
+        assert len(v6.providers) == 2
+        assert all(p.family == 6 for p in v6.providers)

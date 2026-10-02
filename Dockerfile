@@ -40,6 +40,6 @@ USER app
 # Script is the entrypoint, so runtime flags (e.g. --validate) append cleanly
 ENTRYPOINT ["python", "src/ddns_updater.py"]
 
-ARG VERSION=2.3.0
+ARG VERSION=2.4.0
 LABEL description="Cloudflare DDNS Updater" \
       version="${VERSION}"

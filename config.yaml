@@ -9,4 +9,5 @@ cloudflare:
         proxied: false
       - name: "bar" # subdomain (bar.example.com)
         proxied: false
+        type: ["A", "AAAA"] # keep both IPv4 and IPv6 records in sync (defaults to ["A"])
 ttl: 300

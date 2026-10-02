@@ -7,9 +7,9 @@ A Python-based Dynamic DNS updater for Cloudflare that automatically updates DNS
 
 ## Disclaimer
 
-This script is configured to update 'A' DNS records across multiple Cloudflare zones. While the application is designed to handle multiple domains and zones efficiently, please note:
+This script is configured to update 'A' (IPv4) and 'AAAA' (IPv6) DNS records across multiple Cloudflare zones. While the application is designed to handle multiple domains and zones efficiently, please note:
 
-1. The script currently supports only IPv4 (A records) updates
+1. The script supports IPv4 (A records) and IPv6 (AAAA records) updates; IPv6 is opt-in per subdomain via the `type` field
 2. All DNS records must be pre-existing in Cloudflare (the script doesn't create new records)
 3. The script assumes all configured domains are managed under the same Cloudflare account
 4. API rate limits apply based on your Cloudflare plan
@@ -19,7 +19,8 @@ If you need to update other record types (like CNAME, MX, etc.) or require addit
 
 ## Features
 
-- Retrieves the external IP address with automatic fallback across multiple providers (`api.ipify.org`, `checkip.amazonaws.com`, `icanhazip.com`).
+- Retrieves the external IPv4 address with automatic fallback across multiple providers (`api.ipify.org`, `checkip.amazonaws.com`, `icanhazip.com`).
+- Optional IPv6 (AAAA) support with its own provider fallback (`api6.ipify.org`, `ipv6.icanhazip.com`); on hosts without IPv6 connectivity, IPv6 updates are skipped gracefully while IPv4 continues.
 - Automatic IP address monitoring and DNS record updates
 - Support for multiple Cloudflare zones and domains
 
@@ -57,6 +58,7 @@ ttl: 300
     - `name`: Subdomain name (use "@" or empty "" for root domain)
     - `proxied`: Whether to proxy through Cloudflare (true/false)
     - `ttl`: (Optional) Time-to-live in seconds for this specific subdomain. Set to 1 for Auto TTL. If not set, uses the global TTL value.
+    - `type`: (Optional) List of DNS record types to keep in sync. Supported values are `"A"` (IPv4) and `"AAAA"` (IPv6). Defaults to `["A"]`. Add `"AAAA"` to also update the IPv6 record, e.g. `type: ["A", "AAAA"]`. The matching record must already exist in Cloudflare.
 
 Example configuration with per-subdomain TTL:
 
@@ -74,6 +76,7 @@ cloudflare:
         ttl: 120 # 2 minutes TTL for foo subdomain
       - name: "bar"
         proxied: false # Will use global TTL
+        type: ["A", "AAAA"] # Keep both IPv4 and IPv6 records in sync (defaults to ["A"])
 ttl: 300 # Global TTL, used when not specified in subdomain
 ```
 
@@ -190,4 +193,4 @@ This project is licensed under the [MIT License](LICENSE).
 ## Acknowledgments
 
 - The Cloudflare Python API library: https://github.com/cloudflare/python-cloudflare
-- The `ipify.org`, `checkip.amazonaws.com`, and `icanhazip.com` services for retrieving the external IP address
+- The `ipify.org`, `checkip.amazonaws.com`, and `icanhazip.com` services for retrieving the external IPv4 address, and `api6.ipify.org` / `ipv6.icanhazip.com` for IPv6

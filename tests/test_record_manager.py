@@ -269,7 +269,9 @@ class TestRecordManager:
         manager = RecordManager()
         new_ip = "10.0.0.1"
 
-        updates = manager.prepare_updates(mock_zone_config, sample_records, new_ip)
+        updates = manager.prepare_updates(
+            mock_zone_config, sample_records, {"A": new_ip}
+        )
 
         # Should identify 3 records that need updating (www, api, root)
         assert len(updates) == 3
@@ -298,7 +300,9 @@ class TestRecordManager:
         manager = RecordManager()
         current_ip = "192.168.1.1"  # Same as records
 
-        updates = manager.prepare_updates(mock_zone_config, sample_records, current_ip)
+        updates = manager.prepare_updates(
+            mock_zone_config, sample_records, {"A": current_ip}
+        )
 
         # Should find no updates needed (records already have correct IP)
         assert len(updates) == 0
@@ -310,7 +314,9 @@ class TestRecordManager:
         new_ip = "10.0.0.1"
 
         with patch("record_manager.logger") as mock_logger:
-            updates = manager.prepare_updates(mock_zone_config, empty_records, new_ip)
+            updates = manager.prepare_updates(
+                mock_zone_config, empty_records, {"A": new_ip}
+            )
 
             assert len(updates) == 0
             # Should log warnings about missing records
@@ -322,9 +328,80 @@ class TestRecordManager:
         manager = RecordManager()
 
         with pytest.raises(RecordManagerError) as exc_info:
-            manager.prepare_updates(mock_zone_config, [], "10.0.0.1")
+            manager.prepare_updates(mock_zone_config, [], {"A": "10.0.0.1"})
 
         assert "Zone name not populated" in str(exc_info.value)
+
+    def test_prepare_updates_ipv4_and_ipv6_same_fqdn(self):
+        """A and AAAA records sharing a name are matched independently by type"""
+        from configuration_manager import CloudflareZoneConfig, SubdomainConfig
+
+        config = CloudflareZoneConfig(
+            zone_id="test-zone-123",
+            subdomains=[
+                SubdomainConfig(name="www", proxied=False, record_types=["A", "AAAA"])
+            ],
+            authentication=Mock(),
+        )
+        config.zone_name = TEST_ZONE_NAME
+        config.client = Mock()
+
+        records = [
+            MockRecord(
+                id="a1", name="www.example.com", content="192.168.1.1", type="A"
+            ),
+            MockRecord(
+                id="aaaa1",
+                name="www.example.com",
+                content="2001:db8::1",
+                type="AAAA",
+            ),
+        ]
+        new_ips = {"A": "10.0.0.1", "AAAA": "2001:db8::2"}
+
+        manager = RecordManager()
+        updates = manager.prepare_updates(config, records, new_ips)
+
+        assert len(updates) == 2
+        by_type = {u.record_type: u for u in updates}
+        assert by_type["A"].new_content == "10.0.0.1"
+        assert by_type["A"].current_content == "192.168.1.1"
+        assert by_type["AAAA"].new_content == "2001:db8::2"
+        assert by_type["AAAA"].current_content == "2001:db8::1"
+
+    def test_prepare_updates_skips_unavailable_family(self):
+        """A requested family absent from new_ips (e.g. IPv6 down) is skipped"""
+        from configuration_manager import CloudflareZoneConfig, SubdomainConfig
+
+        config = CloudflareZoneConfig(
+            zone_id="test-zone-123",
+            subdomains=[
+                SubdomainConfig(name="www", proxied=False, record_types=["A", "AAAA"])
+            ],
+            authentication=Mock(),
+        )
+        config.zone_name = TEST_ZONE_NAME
+        config.client = Mock()
+
+        records = [
+            MockRecord(
+                id="a1", name="www.example.com", content="192.168.1.1", type="A"
+            ),
+            MockRecord(
+                id="aaaa1",
+                name="www.example.com",
+                content="2001:db8::1",
+                type="AAAA",
+            ),
+        ]
+        # Only IPv4 available
+        new_ips = {"A": "10.0.0.1"}
+
+        manager = RecordManager()
+        updates = manager.prepare_updates(config, records, new_ips)
+
+        assert len(updates) == 1
+        assert updates[0].record_type == "A"
 
     def test_execute_updates_success(self, mock_zone_config):
         """Test successful execution of updates"""
@@ -761,7 +838,7 @@ class TestRecordManagerIntegration:
             mock_adapter.update_record.return_value = True
             MockAdapter.return_value = mock_adapter
 
-            summary = manager.update_zone_records(mock_zone_config, new_ip)
+            summary = manager.update_zone_records(mock_zone_config, {"A": new_ip})
 
             # Should have updated 2 records successfully
             assert summary.total_records == 2
@@ -850,5 +927,5 @@ class TestErrorConditions:
         config.zone_id = TEST_ZONE_ID
 
         with pytest.raises(RecordManagerError) as exc_info:
-            manager.prepare_updates(config, [], "10.0.0.1")
+            manager.prepare_updates(config, [], {"A": "10.0.0.1"})
             assert "zone_name" in str(exc_info.value).lower()
